@@ -1,0 +1,79 @@
+/* Design tokens — every color, spacing, radius, and font used in the app. */
+:root {
+  /* Surfaces */
+  --bg-0: #0d1117;          /* app background */
+  --bg-1: #11161d;          /* card background */
+  --bg-2: #161c25;          /* raised: hover, inputs */
+  --bg-3: #1c2330;          /* overlay drawer, dialogs */
+  --border: #21262d;
+  --border-strong: #30363d;
+
+  /* Text */
+  --text-0: #e6edf3;        /* primary */
+  --text-1: #9da7b3;        /* secondary / meta */
+  --text-2: #6e7781;        /* faint */
+
+  /* Accent */
+  --accent: #6366f1;        /* indigo */
+  --accent-hover: #818cf8;
+  --accent-soft: rgba(99, 102, 241, 0.14);
+
+  /* Status (muted, not garish) */
+  --ok: #3fb950;
+  --ok-soft: rgba(63, 185, 80, 0.12);
+  --warn: #d29922;
+  --warn-soft: rgba(210, 153, 34, 0.14);
+  --danger: #f85149;
+  --danger-soft: rgba(248, 81, 73, 0.12);
+  --stopped: #8b949e;
+  --stopped-soft: rgba(139, 148, 158, 0.12);
+
+  /* Framework badge hues */
+  --fw-react: #61dafb;
+  --fw-vite: #a855f7;
+  --fw-next: #e6edf3;
+  --fw-node: #3fb950;
+  --fw-express: #9da7b3;
+  --fw-nest: #ea2845;
+  --fw-nuxt: #00dc82;
+  --fw-vue: #41b883;
+  --fw-angular: #dd1b16;
+  --fw-astro: #ff5d01;
+  --fw-unknown: #6e7781;
+
+  /* Spacing scale (4px base) */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+
+  /* Radii */
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-pill: 999px;
+
+  /* Typography */
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-md: 13px;
+  --fs-lg: 15px;
+  --fs-xl: 18px;
+
+  /* Motion */
+  --t-fast: 150ms ease;
+  --t-med: 200ms ease;
+
+  /* Elevation */
+  --shadow-1: 0 1px 2px rgba(1, 4, 9, 0.5);
+  --shadow-2: 0 8px 24px rgba(1, 4, 9, 0.6);
+
+  /* Layout */
+  --header-h: 56px;
+  --drawer-w: 400px;
+}
