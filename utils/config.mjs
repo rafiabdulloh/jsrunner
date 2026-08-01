@@ -1,8 +1,10 @@
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
-const BASE = process.env.WORKDIR || process.cwd();
-let base = BASE;
+// Stable per-user location, independent of where the server is started from.
+// Start from any folder → the same config is read/written every time.
+let base = path.join(os.homedir(), '.jsrunner');
 let _counter = 0;
 
 /** Override the config root (called by server.mjs with the --workdir CLI value). */
