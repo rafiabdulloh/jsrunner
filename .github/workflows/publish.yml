@@ -1,8 +1,5 @@
 name: Publish to npm
 
-# Rilis = tag `vX.Y.Z` di-push → GitHub Actions publish otomatis ke npm.
-# Tidak perlu publish manual; tinggal `npm version patch && git push --tags`.
-
 on:
   push:
     tags:
@@ -13,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write # wajib untuk npm publish --provenance
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
