@@ -26,7 +26,7 @@ Usage:
 
 Options:
   --port <n>       HTTP port                  (default: 9999, env PORT)
-  --host <addr>    Bind address               (default: 127.0.0.1, env HOST;
+  --host <addr>    Bind address               (default: localhost, env HOST;
                    use 0.0.0.0 to expose on the LAN — the tool has NO auth)
   --workdir <dir>  Root for static files + config/projects.json
                                               (default: cwd, env WORKDIR)
@@ -54,7 +54,7 @@ function readVersion() {
 
 const opts = {
   port: parseInt(process.env.PORT, 10) || 9999,
-  host: process.env.HOST || '127.0.0.1',
+  host: process.env.HOST || 'localhost',
   workdir: process.env.WORKDIR || process.cwd(),
 };
 
@@ -67,7 +67,7 @@ const opts = {
       case '--help': case '-h': printHelp(); process.exit(0); break;
       case '--version': case '-v': console.log(readVersion()); process.exit(0); break;
       case '--port': opts.port = parseInt(next(), 10) || 9999; break;
-      case '--host': opts.host = next() || '127.0.0.1'; break;
+      case '--host': opts.host = next() || 'localhost'; break;
       case '--workdir': opts.workdir = next() || process.cwd(); break;
       default:
         console.error(`Unknown option: ${a}\n\n${USAGE}`);
