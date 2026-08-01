@@ -1,6 +1,6 @@
 {
-  "name": "jsrunner",
-  "version": "0.1.0",
+  "name": "@shizuyume/jsrunner",
+  "version": "0.1.1",
   "description": "Run many local JavaScript/TypeScript dev projects from one dashboard — no terminal juggling. Zero dependencies.",
   "type": "module",
   "bin": {

@@ -29,7 +29,7 @@ function isPortAvailable(port) {
     server.once('error', () => resolve(false));
     server.once('listening', () => { server.close(); resolve(true); });
     // Bind all interfaces — dev servers (craco/vite) bind 0.0.0.0; checking
-    // 127.0.0.1 alone misses them on Windows.
+    // localhost alone misses them on Windows.
     server.listen(port);
   });
 }

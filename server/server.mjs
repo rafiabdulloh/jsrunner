@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import http from 'http';
 import fs from 'fs';
+import { fileURLToPath } from 'node:url';
 import { createRouter } from './router.mjs';
 import { serveStatic } from './static.mjs';
 import { registerProjectRoutes } from '../api/projects.mjs';
@@ -26,10 +27,9 @@ Usage:
 
 Options:
   --port <n>       HTTP port                  (default: 9999, env PORT)
-  --host <addr>    Bind address               (default: 127.0.0.1, env HOST;
+  --host <addr>    Bind address               (default: localhost, env HOST;
                    use 0.0.0.0 to expose on the LAN — the tool has NO auth)
-  --workdir <dir>  Root for static files + config/projects.json
-                                              (default: cwd, env WORKDIR)
+  --workdir <dir>  Where config/projects.json lives (default: cwd, env WORKDIR)
   --version, -v    Print version and exit
   --help, -h       Show this help and exit
 
@@ -43,18 +43,37 @@ function printHelp() {
   console.log(USAGE);
 }
 
-function readVersion() {
+function readPackage() {
   try {
-    const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf-8'));
-    return pkg.version || '0.0.0';
+    return JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf-8'));
   } catch {
-    return '0.0.0-dev';
+    return { name: 'jsrunner', version: '0.0.0-dev' };
+  }
+}
+
+const pkg = readPackage();
+
+// Self-update notice: user-installed copies get a heads-up when a new
+// version lands on npm. Read-only, never blocks startup, silent offline.
+async function checkForUpdate() {
+  try {
+    const res = await fetch(`https://registry.npmjs.org/${pkg.name}/latest`, {
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!res.ok) return;
+    const { version } = await res.json();
+    if (version && version !== pkg.version) {
+      console.log(`\n⬆  Update tersedia: ${pkg.name}@${version} (terpasang: ${pkg.version})`);
+      console.log(`   Jalankan: npm install -g ${pkg.name}@latest\n`);
+    }
+  } catch {
+    // Offline or registry hiccup — skip silently.
   }
 }
 
 const opts = {
   port: parseInt(process.env.PORT, 10) || 9999,
-  host: process.env.HOST || '127.0.0.1',
+  host: process.env.HOST || 'localhost',
   workdir: process.env.WORKDIR || process.cwd(),
 };
 
@@ -65,9 +84,9 @@ const opts = {
     const a = next();
     switch (a) {
       case '--help': case '-h': printHelp(); process.exit(0); break;
-      case '--version': case '-v': console.log(readVersion()); process.exit(0); break;
+      case '--version': case '-v': console.log(pkg.version); process.exit(0); break;
       case '--port': opts.port = parseInt(next(), 10) || 9999; break;
-      case '--host': opts.host = next() || '127.0.0.1'; break;
+      case '--host': opts.host = next() || 'localhost'; break;
       case '--workdir': opts.workdir = next() || process.cwd(); break;
       default:
         console.error(`Unknown option: ${a}\n\n${USAGE}`);
@@ -80,8 +99,14 @@ const PORT = opts.port;
 const WORKDIR = opts.workdir;
 config.setBase(WORKDIR);
 
+// Static files ship inside the package (repo root in dev, node_modules when
+// installed globally). Config stays in WORKDIR so users keep a writable copy.
+// ponytail: single-file bundle (pkg/nexe) can't serve public/ from disk —
+// embed it as an assets map when that mode is needed.
+const PKG_ROOT = fileURLToPath(new URL('../', import.meta.url));
+
 const router = createRouter();
-const staticHandler = serveStatic(WORKDIR);
+const staticHandler = serveStatic(PKG_ROOT);
 
 registerProjectRoutes(router, processManager);
 logger.initLogger(processManager);
@@ -110,6 +135,7 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, opts.host, () => {
   console.log(`Server listening on http://${opts.host}:${PORT}`);
+  checkForUpdate();
 });
 
 // Kill all child processes on shutdown
