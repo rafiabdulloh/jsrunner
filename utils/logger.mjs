@@ -15,12 +15,13 @@ export function initLogger(processManager) {
   });
 }
 
-export function pushLog(id, text, err) {
+export function pushLog(id, text, err, script) {
   const entry = normalize(text, err);
-  let buf = buffers.get(id);
+  const key = `${id}:${script || ''}`;
+  let buf = buffers.get(key);
   if (!buf) {
     buf = [];
-    buffers.set(id, buf);
+    buffers.set(key, buf);
   }
   buf.push(entry);
   if (buf.length > MAX_LINES) {
@@ -28,16 +29,41 @@ export function pushLog(id, text, err) {
   }
 }
 
-export function getLogs(id, after = 0) {
-  const buf = buffers.get(id);
-  if (!buf) return { total: 0, lines: [] };
-  return { total: buf.length, lines: buf.slice(after) };
+function mergedLines(keys) {
+  const lines = [];
+  for (const k of keys) {
+    const buf = buffers.get(k);
+    if (buf) lines.push(...buf);
+  }
+  lines.sort((a, b) => a.ts - b.ts);
+  return lines;
 }
 
-export function clearLogs(id) {
-  buffers.delete(id);
+export function getLogs(id, after = 0, script) {
+  if (script) {
+    // Per-script buffer, falling back to the general key when the process
+    // layer doesn't tag logs with a script (logCallback sends (id, text, err)).
+    const buf = buffers.get(`${id}:${script}`) || buffers.get(`${id}:`);
+    if (!buf) return { total: 0, lines: [] };
+    return { total: buf.length, lines: buf.slice(after) };
+  }
+  const prefix = `${id}:`;
+  const keys = [...buffers.keys()].filter((k) => k.startsWith(prefix)).sort();
+  const lines = mergedLines(keys);
+  return { total: lines.length, lines: lines.slice(after) };
+}
+
+function deletePrefix(prefix) {
+  for (const k of [...buffers.keys()]) {
+    if (k.startsWith(prefix)) buffers.delete(k);
+  }
+}
+
+export function clearLogs(id, script) {
+  if (script) buffers.delete(`${id}:${script}`);
+  else deletePrefix(`${id}:`);
 }
 
 export function removeLogs(id) {
-  buffers.delete(id);
+  deletePrefix(`${id}:`);
 }

@@ -9,6 +9,8 @@ let timer = null;
 let cursor = 0;
 let autoScroll = true;
 let currentId = null;
+let currentScript = null;
+let searchQuery = '';
 
 function build() {
   const backdrop = document.createElement('div');
@@ -29,6 +31,10 @@ function build() {
         <button class="btn btn--sm btn--icon" data-lact="close" title="Close">${icons.x}</button>
       </div>
     </div>
+    <div class="drawer__toolbar">
+      <input class="drawer__search" data-lact="search" type="text" placeholder="Search logs…" spellcheck="false" autocomplete="off">
+      <span class="drawer__match-count" data-lact="count"></span>
+    </div>
     <div class="drawer__body"></div>`;
   document.body.appendChild(panel);
 
@@ -42,6 +48,10 @@ function build() {
     btn.innerHTML = autoScroll ? icons.pause : icons.resume;
     btn.title = autoScroll ? 'Pause auto scroll' : 'Resume auto scroll';
   });
+  panel.querySelector('[data-lact="search"]').addEventListener('input', (e) => {
+    searchQuery = e.target.value;
+    applySearch();
+  });
   // Pause auto scroll when the user scrolls up manually.
   body.addEventListener('wheel', (e) => {
     if (e.deltaY < 0 && autoScroll) panel.querySelector('[data-lact="pause"]').click();
@@ -51,7 +61,7 @@ function build() {
 async function poll() {
   if (!currentId) return;
   try {
-    const { lines, total } = await api.fetchLogs(currentId, cursor);
+    const { lines, total } = await api.fetchLogs(currentId, cursor, currentScript);
     if (!currentId) return; // closed while awaiting
     if (total < cursor) cursor = 0; // buffer was cleared elsewhere
     if (lines.length) appendLines(lines);
@@ -69,8 +79,12 @@ function appendLines(lines) {
     const div = document.createElement('div');
     div.className = `drawer__line${line.err ? ' drawer__line--err' : ''}`;
     div.textContent = line.text;
+    if (searchQuery.trim() && !line.text.toLowerCase().includes(searchQuery.trim().toLowerCase())) {
+      div.classList.add('drawer__line--hidden');
+    }
     body.appendChild(div);
   }
+  if (searchQuery.trim()) applySearch(); // refresh match count
   if (autoScroll) body.scrollTop = body.scrollHeight;
 }
 
@@ -81,19 +95,38 @@ function renderEmpty() {
   div.className = 'drawer__empty';
   div.textContent = 'No logs yet. Start the project to see output.';
   body.appendChild(div);
+  const count = panel.querySelector('[data-lact="count"]');
+  if (count) count.textContent = '';
 }
 
-export function openLogPanel(id) {
+function applySearch() {
+  const body = panel.querySelector('.drawer__body');
+  const q = searchQuery.trim().toLowerCase();
+  let shown = 0;
+  for (const el of body.querySelectorAll('.drawer__line')) {
+    const hit = !q || el.textContent.toLowerCase().includes(q);
+    el.classList.toggle('drawer__line--hidden', !hit);
+    if (hit) shown++;
+  }
+  const count = panel.querySelector('[data-lact="count"]');
+  if (count) count.textContent = q ? `${shown} match${shown === 1 ? '' : 'es'}` : '';
+}
+
+export function openLogPanel(id, script) {
   if (!panel) build();
   closeLogPanel(); // reset any previous session, keep the DOM node
   const p = getProject(id);
   if (!p) return;
 
   currentId = id;
+  currentScript = script || null;
   cursor = 0;
   autoScroll = true;
+  searchQuery = '';
+  const searchInput = panel.querySelector('[data-lact="search"]');
+  if (searchInput) searchInput.value = '';
   panel.querySelector('[data-lact="pause"]').innerHTML = icons.pause;
-  panel.querySelector('.drawer__title').textContent = `${p.name} — logs`;
+  panel.querySelector('.drawer__title').textContent = script ? `${p.name} — ${script} logs` : `${p.name} — logs`;
   renderEmpty();
   panel.classList.add('drawer--open');
   const bd = document.querySelector('.drawer-backdrop');

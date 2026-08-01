@@ -1,1 +1,184 @@
-[]
+[
+  {
+    "id": "p_ms8cocoj_0",
+    "name": "@business-service-mini-ticast/frontend",
+    "group": "Business Host",
+    "framework": "React",
+    "pm": "npm",
+    "folder": "D:/Neuronworks/project/tm-forum/business-service-mini-ticast/frontend",
+    "path": "D:\\Neuronworks\\project\\tm-forum\\business-service-mini-ticast\\frontend\\package.json",
+    "port": 8889,
+    "scripts": [
+      "build",
+      "eject",
+      "start",
+      "start:prod",
+      "test"
+    ],
+    "subProjects": [],
+    "color": "hsl(328, 55%, 45%)",
+    "status": "stopped",
+    "pid": null,
+    "startedAt": null,
+    "cpu": 0,
+    "mem": 0,
+    "version": "0.1.0"
+  },
+  {
+    "id": "p_ms8cz9ea_2",
+    "name": "@party-service/backend",
+    "group": "Tribes (TMF) - Backend",
+    "framework": "NestJS",
+    "pm": "yarn",
+    "folder": "D:/Neuronworks/project/tm-forum/party-service/backend",
+    "path": "D:\\Neuronworks\\project\\tm-forum\\party-service\\backend\\package.json",
+    "port": 3010,
+    "scripts": [
+      "build",
+      "format",
+      "lint",
+      "migration:generate",
+      "migration:revert",
+      "migration:run",
+      "migration:show",
+      "seed:run",
+      "start",
+      "start:debug",
+      "start:dev",
+      "start:prod",
+      "test",
+      "test:cov",
+      "test:debug",
+      "test:e2e",
+      "test:watch"
+    ],
+    "subProjects": [],
+    "color": "hsl(278, 55%, 45%)",
+    "status": "stopped",
+    "pid": null,
+    "startedAt": null
+  },
+  {
+    "id": "p_ms8d3fd3_4",
+    "name": "@resource-management-service/backend",
+    "group": "Tribes (TMF) - Backend",
+    "framework": "NestJS",
+    "pm": "yarn",
+    "folder": "D:/Neuronworks/project/tm-forum/resource-management-service/backend",
+    "path": "D:\\Neuronworks\\project\\tm-forum\\resource-management-service\\backend\\package.json",
+    "port": 3634,
+    "scripts": [
+      "build",
+      "format",
+      "lint",
+      "mariadb",
+      "mariadb:stop",
+      "neo4j",
+      "neo4j:stop",
+      "rabbitmq",
+      "rabbitmq:stop",
+      "seed",
+      "seed:bearer-spec",
+      "seed:cable-system",
+      "seed:catalog",
+      "seed:master-data-cable-spec",
+      "seed:mini-ticast",
+      "seed:reservation",
+      "seed:resource-catalog-and-reservation",
+      "seed:resource-catalog-management",
+      "seed:tmf-full",
+      "start",
+      "start:ctk",
+      "start:debug",
+      "start:dev",
+      "start:prod",
+      "test",
+      "test:contract:full",
+      "test:contract:negative",
+      "test:contract:positive",
+      "test:contract:tmf664",
+      "test:cov",
+      "test:cov:txt",
+      "test:debug",
+      "test:e2e",
+      "test:watch"
+    ],
+    "subProjects": [],
+    "color": "hsl(195, 55%, 45%)",
+    "status": "stopped",
+    "pid": null,
+    "startedAt": null
+  },
+  {
+    "id": "p_ms8fplmo_0",
+    "name": "geographic-address-service",
+    "group": null,
+    "framework": "Node",
+    "pm": "yarn",
+    "folder": "D:/Neuronworks/project/tm-forum/geographic-address-service",
+    "path": "D:\\Neuronworks\\project\\tm-forum\\geographic-address-service\\package.json",
+    "port": null,
+    "scripts": [
+      "build:all",
+      "dev",
+      "dev:backend",
+      "dev:frontend",
+      "lint",
+      "prepare",
+      "prod"
+    ],
+    "subProjects": [
+      {
+        "name": "backend",
+        "path": "D:\\Neuronworks\\project\\tm-forum\\geographic-address-service\\backend\\package.json",
+        "port": 3007
+      },
+      {
+        "name": "frontend",
+        "path": "D:\\Neuronworks\\project\\tm-forum\\geographic-address-service\\frontend\\package.json",
+        "port": 8087
+      }
+    ],
+    "color": "hsl(107, 55%, 45%)",
+    "status": "stopped",
+    "pid": null,
+    "startedAt": null
+  },
+  {
+    "id": "p_ms8g6eeb_0",
+    "name": "resource-management-service",
+    "group": null,
+    "framework": "Node",
+    "pm": "yarn",
+    "folder": "D:/Neuronworks/project/tm-forum/resource-management-service",
+    "path": "D:\\Neuronworks\\project\\tm-forum\\resource-management-service\\package.json",
+    "port": null,
+    "scripts": [
+      "build:be",
+      "build:fe",
+      "dev",
+      "dev:be",
+      "dev:fe",
+      "install:all",
+      "start",
+      "traceability"
+    ],
+    "subProjects": [
+      {
+        "name": "backend",
+        "path": "D:\\Neuronworks\\project\\tm-forum\\resource-management-service\\backend\\package.json",
+        "port": 3634
+      },
+      {
+        "name": "frontend",
+        "path": "D:\\Neuronworks\\project\\tm-forum\\resource-management-service\\frontend\\package.json",
+        "port": 8021
+      }
+    ],
+    "color": "hsl(196, 55%, 45%)",
+    "status": "stopped",
+    "pid": null,
+    "startedAt": null,
+    "version": "1.0.0"
+  }
+]

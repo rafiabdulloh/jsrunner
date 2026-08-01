@@ -2,7 +2,13 @@ import fs from 'fs';
 import path from 'path';
 
 const BASE = process.env.WORKDIR || process.cwd();
+let base = BASE;
 let _counter = 0;
+
+/** Override the config root (called by server.mjs with the --workdir CLI value). */
+export function setBase(dir) {
+  base = dir;
+}
 
 // Predefined harmonious hues for backfill
 const HUES = [210, 160, 30, 340, 190, 280, 15, 50, 100, 260, 330, 40, 170, 300, 80];
@@ -13,7 +19,7 @@ function nextColor() {
 }
 
 export function getConfigPath() {
-  return path.join(BASE, 'config', 'projects.json');
+  return path.join(base, 'config', 'projects.json');
 }
 
 export function loadConfig() {
@@ -42,6 +48,8 @@ export function loadConfig() {
 
 export function saveConfig(data) {
   const configPath = getConfigPath();
+  // Fresh installs ship without the config/ dir — create it on first write.
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
   const tmpPath = configPath + '.tmp';
   fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2), 'utf-8');
   fs.renameSync(tmpPath, configPath);

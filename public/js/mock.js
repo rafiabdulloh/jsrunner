@@ -156,7 +156,7 @@ function crash(p) {
 }
 
 // Occupied by "something else" on the machine, per BRD port-check demo.
-const EXTERNAL_OCCUPIED_PORTS = new Set([3000, 8080]);
+const EXTERNAL_OCCUPIED_PORTS = new Set([9999, 9876]);
 
 // Track cancelled scripts for cancellable runScript
 const scriptCancelled = new Set();

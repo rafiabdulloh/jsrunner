@@ -92,7 +92,7 @@ export function startMetricsCollection(processManager, onUpdate) {
     } catch {
       // Swallow — don't crash polling loop
     }
-  }, 3000);
+  }, 9999);
 
   return { stop: () => clearInterval(timer) };
 }

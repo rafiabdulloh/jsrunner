@@ -1,4 +1,5 @@
 import net from 'net';
+import fs from 'fs';
 
 function sendJSON(res, status, data) {
   const body = JSON.stringify(data);
@@ -27,11 +28,42 @@ function isPortAvailable(port) {
     const server = net.createServer();
     server.once('error', () => resolve(false));
     server.once('listening', () => { server.close(); resolve(true); });
-    server.listen(port, '127.0.0.1');
+    // Bind all interfaces — dev servers (craco/vite) bind 0.0.0.0; checking
+    // 127.0.0.1 alone misses them on Windows.
+    server.listen(port);
   });
 }
 
+/**
+ * Resolve which port a start action will bind.
+ * Priority: sub-project match (dev:frontend -> subProjects.frontend.port)
+ *           > PORT=NNN in the script value (re-read package.json)
+ *           > project.port
+ */
+function resolveScriptPort(project, script) {
+  if (script && project.subProjects?.length > 0) {
+    const suffix = script.split(':').pop();
+    const sp = project.subProjects.find((s) => s.name === suffix);
+    if (sp?.port) return sp.port;
+  }
+  if (script && project.scripts?.includes(script)) {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(project.path, 'utf-8'));
+      const value = pkg.scripts?.[script] || '';
+      const m = value.match(/\bPORT=(\d+)/);
+      if (m) return parseInt(m[1], 10);
+    } catch { /* fall through */ }
+  }
+  return project.port || null;
+}
+
 export function registerControlRoutes(router, config, processManager) {
+  function withRunningServices(project) {
+    const services = processManager.getRunningServices(project.id);
+    const status = services.length > 0 ? 'running' : (project.status || 'stopped');
+    return { ...project, status, runningServices: services };
+  }
+
   // POST /api/project/start
   router.post('/api/project/start', async (req, res) => {
     let body;
@@ -42,40 +74,40 @@ export function registerControlRoutes(router, config, processManager) {
       return;
     }
 
-    const { id } = body;
+    const { id, script } = body;
     const project = config.getProject(id);
     if (!project) {
       sendJSON(res, 404, { error: 'Project not found' });
       return;
     }
 
-    // Idempotent: already running or starting
-    if (project.status === 'running' || project.status === 'starting') {
-      sendJSON(res, 200, project);
+    // Idempotent: requested script already running
+    const running = processManager.getRunningServices(id);
+    if (script && running.some((s) => s.script === script)) {
+      sendJSON(res, 200, withRunningServices(project));
+      return;
+    }
+    if (!script && running.length > 0) {
+      sendJSON(res, 200, withRunningServices(project));
       return;
     }
 
-    // Port conflict check
-    if (project.port) {
-      const available = await isPortAvailable(project.port);
+    // Resolve the port this start will use, then check for conflicts.
+    const portToUse = resolveScriptPort(project, script);
+    if (portToUse) {
+      const available = await isPortAvailable(portToUse);
       if (!available) {
-        sendJSON(res, 500, { error: 'Failed to start process' });
+        sendJSON(res, 409, { error: 'Port already in use.' });
         return;
       }
     }
 
     try {
-      // Optimistic: mark as starting so concurrent requests see it
-      config.updateProject(id, { status: 'starting' });
-      const result = processManager.startProjectProcess(project);
-      const updated = config.updateProject(id, {
-        status: result.status || 'running',
-        pid: result.pid || null,
-        startedAt: result.startedAt || null,
-        cpu: 0,
-        mem: 0,
-      });
-      sendJSON(res, 200, updated);
+      // Explicit script starts one service; empty script starts the default (dev > start > first)
+      const result = script
+        ? processManager.startServiceProcess(project, script)
+        : processManager.startProjectProcess(project);
+      sendJSON(res, 200, withRunningServices(project));
     } catch {
       sendJSON(res, 500, { error: 'Failed to start process' });
     }
@@ -91,28 +123,19 @@ export function registerControlRoutes(router, config, processManager) {
       return;
     }
 
-    const { id } = body;
+    const { id, script } = body;
     const project = config.getProject(id);
     if (!project) {
       sendJSON(res, 404, { error: 'Project not found' });
       return;
     }
 
-    // Idempotent: already stopped or crashed
-    if (project.status === 'stopped' || project.status === 'crashed') {
-      sendJSON(res, 200, project);
-      return;
+    if (script) {
+      processManager.stopServiceProcess(id, script);
+    } else {
+      processManager.stopAllServicesForProject(id);
     }
-
-    processManager.stopProjectProcess(id);
-    const updated = config.updateProject(id, {
-      status: 'stopped',
-      pid: null,
-      startedAt: null,
-      cpu: 0,
-      mem: 0,
-    });
-    sendJSON(res, 200, updated);
+    sendJSON(res, 200, withRunningServices(project));
   });
 
   // POST /api/project/restart
