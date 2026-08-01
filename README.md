@@ -58,19 +58,19 @@ node server/server.mjs
 
 # 3. Buka dashboard
 # Browser otomatis terbuka di:
-http://localhost:3000
+http://localhost:9999
 ```
 
 ### Konfigurasi Environment
 
 | Variable | Default | Fungsi |
 |---|---|---|
-| `PORT` | `3000` | Port dashboard |
+| `PORT` | `9999` | Port dashboard |
 | `WORKDIR` | direktori sekarang | Lokasi root untuk melayani file statis |
 
 ```bash
 # Contoh: jalankan di port lain
-PORT=8080 node server/server.mjs
+PORT=9876 node server/server.mjs
 ```
 
 ---

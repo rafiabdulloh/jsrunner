@@ -1,0 +1,31 @@
+name: Publish to npm
+
+# Rilis = tag `vX.Y.Z` di-push → GitHub Actions publish otomatis ke npm.
+# Tidak perlu publish manual; tinggal `npm version patch && git push --tags`.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # wajib untuk npm publish --provenance
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
+      - name: Syntax gate
+        run: node --check server/server.mjs
+
+      - name: Publish (with provenance)
+        run: npm publish --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

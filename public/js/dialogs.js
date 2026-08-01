@@ -4,6 +4,17 @@ import { api } from './api.js';
 import { icons } from './icons.js';
 import { toastError, toastSuccess } from './toast.js';
 import { getProject, updateProject, addProject, removeProject, getState } from './state.js';
+import { openLogPanel } from './logs.js';
+
+function formatUptime(startedAt) {
+  if (!startedAt) return '—';
+  const s = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  const pad = (n) => String(n).padStart(2, '0');
+  return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${pad(m)}:${pad(sec)}`;
+}
 
 const esc = (s) =>
   String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -363,6 +374,124 @@ export function openDeleteGroupDialog(name) {
     ],
   });
 }
+// ---------- Service Detail Modal ----------
+export function openServiceDialog(id, script) {
+  const p = getProject(id);
+  if (!p) return;
+
+  let timer = null;
+  const { openModal } = {};
+
+  const openModal2 = ({ title, bodyHtml, actions }) => {
+    const opener = document.activeElement;
+    const backdrop = document.createElement('div');
+    backdrop.className = 'modal-backdrop';
+    backdrop.innerHTML = `
+      <div class="modal" role="dialog" aria-modal="true" aria-label="${title}">
+        <div class="modal__header">
+          <span class="modal__title">${title}</span>
+          <button class="btn btn--sm btn--icon" data-mact="close" title="Close">${icons.x}</button>
+        </div>
+        <div class="modal__body">${bodyHtml}</div>
+        <div class="modal__footer"></div>
+      </div>`;
+
+    const close = () => {
+      if (timer) clearInterval(timer);
+      document.removeEventListener('keydown', onKey, true);
+      backdrop.remove();
+      opener?.focus?.();
+    };
+    const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
+    document.addEventListener('keydown', onKey, true);
+    backdrop.addEventListener('mousedown', (e) => { if (e.target === backdrop) close(); });
+    backdrop.querySelector('[data-mact="close"]').addEventListener('click', close);
+
+    const footer = backdrop.querySelector('.modal__footer');
+    for (const a of actions) {
+      const btn = document.createElement('button');
+      btn.className = `btn ${a.primary ? 'btn--primary' : ''} ${a.danger ? 'btn--danger' : ''}`;
+      btn.textContent = a.label;
+      btn.dataset.svcAction = a.key || '';
+      btn.addEventListener('click', () => a.onClick({ backdrop, close, btn }));
+      footer.appendChild(btn);
+    }
+    document.body.appendChild(backdrop);
+    return { backdrop, close };
+  };
+
+  const serviceIsRunning = () => {
+    const cur = getProject(id);
+    return cur?.runningServices?.some((s) => s.script === script);
+  };
+
+  const getService = () => {
+    const cur = getProject(id);
+    return cur?.runningServices?.find((s) => s.script === script) || null;
+  };
+
+  const render = () => {
+    const cur = getProject(id);
+    if (!cur) return;
+    const svc = getService();
+    const body = backdrop?.querySelector('.modal__body');
+    if (!body) return;
+    body.innerHTML = `
+      <dl class="card__meta">
+        ${field('Status', `<span class="pill pill--${svc ? 'running' : 'stopped'}">${svc ? 'Running' : 'Stopped'}</span>`)}
+        ${svc ? field('PID', `<div class="field__value">${svc.pid}</div>`) : ''}
+        ${svc ? field('Uptime', `<div class="field__value">${formatUptime(svc.startedAt)}</div>`) : ''}
+      </dl>`;
+    const footer = backdrop?.querySelector('.modal__footer');
+    if (!footer) return;
+    const startBtn = footer.querySelector('[data-svc-action="start"]');
+    const stopBtn = footer.querySelector('[data-svc-action="stop"]');
+    if (startBtn) startBtn.disabled = !!svc;
+    if (stopBtn) stopBtn.disabled = !svc;
+  };
+
+  let backdrop;
+  const m = openModal2({
+    title: `${script} — ${p.name}`,
+    bodyHtml: '<div class="service-modal-body"></div>',
+    actions: [
+      {
+        label: 'View Log',
+        primary: true,
+        key: 'log',
+        onClick: ({ close }) => { close(); openLogPanel(id, script); },
+      },
+      {
+        label: 'Start',
+        key: 'start',
+        onClick: async ({ close, btn }) => {
+          btn.disabled = true;
+          try { await api.startProject(id, script); toastSuccess(`${script} started`); }
+          catch (err) { toastError(err.message); }
+          btn.disabled = false;
+        },
+      },
+      {
+        label: 'Stop',
+        danger: true,
+        key: 'stop',
+        onClick: async ({ close, btn }) => {
+          btn.disabled = true;
+          try { await api.stopProject(id, script); toastSuccess(`${script} stopped`); }
+          catch (err) { toastError(err.message); }
+          btn.disabled = false;
+        },
+      },
+    ],
+  });
+  backdrop = m.backdrop;
+  render();
+  timer = setInterval(() => {
+    const cur = getProject(id);
+    if (cur) { render(); }
+  }, 2000);
+}
+
 // ---------- Delete ----------
 export function openDeleteDialog(id) {
   const p = getProject(id);

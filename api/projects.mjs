@@ -25,10 +25,13 @@ function collectBody(req) {
   });
 }
 
-export function registerProjectRoutes(router) {
+export function registerProjectRoutes(router, processManager) {
   router.get('/api/projects', async (req, res, ctx) => {
     const projects = config.getProjects();
-    sendJSON(res, 200, projects);
+    sendJSON(res, 200, projects.map((p) => {
+      const services = processManager.getRunningServices(p.id);
+      return { ...p, status: services.length > 0 ? 'running' : (p.status || 'stopped'), runningServices: services };
+    }));
   });
 
   router.post('/api/project', async (req, res, ctx) => {

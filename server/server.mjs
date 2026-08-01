@@ -1,4 +1,6 @@
+#!/usr/bin/env node
 import http from 'http';
+import fs from 'fs';
 import { createRouter } from './router.mjs';
 import { serveStatic } from './static.mjs';
 import { registerProjectRoutes } from '../api/projects.mjs';
@@ -12,13 +14,76 @@ import { registerPortRoutes } from '../api/port.mjs';
 import { registerPathRoutes } from '../api/path.mjs';
 import { registerGroupRoutes } from '../api/group.mjs';
 
-const PORT = parseInt(process.env.PORT, 10) || 3000;
-const WORKDIR = process.env.WORKDIR || process.cwd();
+// ---------------------------------------------------------------------------
+// CLI argument parsing (falls back to env, then defaults)
+// ---------------------------------------------------------------------------
+const USAGE = `jsrunner — local multi-project dev dashboard
+
+Usage:
+  jsrunner [options]
+  jsr [options]
+  npm start [-- --help]
+
+Options:
+  --port <n>       HTTP port                  (default: 9999, env PORT)
+  --host <addr>    Bind address               (default: 127.0.0.1, env HOST;
+                   use 0.0.0.0 to expose on the LAN — the tool has NO auth)
+  --workdir <dir>  Root for static files + config/projects.json
+                                              (default: cwd, env WORKDIR)
+  --version, -v    Print version and exit
+  --help, -h       Show this help and exit
+
+Examples:
+  jsrunner                        Start on http://localhost:9999
+  jsrunner --port 9876            Start on http://localhost:9876
+  jsrunner --host 0.0.0.0         Expose to local network (no auth — be careful)
+`;
+
+function printHelp() {
+  console.log(USAGE);
+}
+
+function readVersion() {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf-8'));
+    return pkg.version || '0.0.0';
+  } catch {
+    return '0.0.0-dev';
+  }
+}
+
+const opts = {
+  port: parseInt(process.env.PORT, 10) || 9999,
+  host: process.env.HOST || '127.0.0.1',
+  workdir: process.env.WORKDIR || process.cwd(),
+};
+
+{
+  const args = process.argv.slice(2);
+  const next = () => args.shift();
+  while (args.length) {
+    const a = next();
+    switch (a) {
+      case '--help': case '-h': printHelp(); process.exit(0); break;
+      case '--version': case '-v': console.log(readVersion()); process.exit(0); break;
+      case '--port': opts.port = parseInt(next(), 10) || 9999; break;
+      case '--host': opts.host = next() || '127.0.0.1'; break;
+      case '--workdir': opts.workdir = next() || process.cwd(); break;
+      default:
+        console.error(`Unknown option: ${a}\n\n${USAGE}`);
+        process.exit(1);
+    }
+  }
+}
+
+const PORT = opts.port;
+const WORKDIR = opts.workdir;
+config.setBase(WORKDIR);
 
 const router = createRouter();
 const staticHandler = serveStatic(WORKDIR);
 
-registerProjectRoutes(router);
+registerProjectRoutes(router, processManager);
 logger.initLogger(processManager);
 registerLogRoutes(router, config, logger);
 registerControlRoutes(router, config, processManager);
@@ -43,8 +108,8 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => {
-  console.log(`Server listening on http://localhost:${PORT}`);
+server.listen(PORT, opts.host, () => {
+  console.log(`Server listening on http://${opts.host}:${PORT}`);
 });
 
 // Kill all child processes on shutdown
