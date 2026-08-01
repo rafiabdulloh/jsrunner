@@ -29,7 +29,7 @@ Options:
   --port <n>       HTTP port                  (default: 9999, env PORT)
   --host <addr>    Bind address               (default: localhost, env HOST;
                    use 0.0.0.0 to expose on the LAN — the tool has NO auth)
-  --workdir <dir>  Where config/projects.json lives (default: cwd, env WORKDIR)
+  --workdir <dir>  Where config/projects.json lives (default: ~/.jsrunner, env WORKDIR)
   --version, -v    Print version and exit
   --help, -h       Show this help and exit
 
@@ -41,6 +41,24 @@ Examples:
 
 function printHelp() {
   console.log(USAGE);
+}
+
+function printBanner() {
+  const tty = Boolean(process.stdout.isTTY);
+  const c = (n, s) => (tty ? `\x1b[${n}m${s}\x1b[0m` : s);
+  const url = opts.host === '0.0.0.0' ? `http://localhost:${PORT}` : `http://${opts.host}:${PORT}`;
+  const w = 54;
+  const edge = c('36', '═'.repeat(w));
+  console.log(edge);
+  console.log(`${c('1;36', '  🚀 jsrunner')} ${c('33', `v${pkg.version}`)}`);
+  console.log(`  ${c('2', 'Local multi-project dev dashboard — zero dependencies')}`);
+  console.log(edge);
+  console.log(`  ${c('1;32', '→')} Dashboard : ${c('4;1', url)}`);
+  console.log(`  ${c('1;32', '→')} Config    : ${config.getConfigPath()}`);
+  if (opts.workdir) console.log(`  ${c('1;32', '→')} Workdir   : ${opts.workdir}`);
+  console.log(edge);
+  console.log(`  ${c('2', 'Update check on startup — Ctrl+C stops all running processes')}`);
+  console.log('');
 }
 
 function readPackage() {
@@ -74,7 +92,7 @@ async function checkForUpdate() {
 const opts = {
   port: parseInt(process.env.PORT, 10) || 9999,
   host: process.env.HOST || 'localhost',
-  workdir: process.env.WORKDIR || process.cwd(),
+  workdir: process.env.WORKDIR || null,
 };
 
 {
@@ -96,11 +114,11 @@ const opts = {
 }
 
 const PORT = opts.port;
-const WORKDIR = opts.workdir;
-config.setBase(WORKDIR);
+if (opts.workdir) config.setBase(opts.workdir);
 
 // Static files ship inside the package (repo root in dev, node_modules when
-// installed globally). Config stays in WORKDIR so users keep a writable copy.
+// installed globally). Config defaults to ~/.jsrunner (stable) unless
+// --workdir/WORKDIR overrides it.
 // ponytail: single-file bundle (pkg/nexe) can't serve public/ from disk —
 // embed it as an assets map when that mode is needed.
 const PKG_ROOT = fileURLToPath(new URL('../', import.meta.url));
@@ -134,7 +152,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, opts.host, () => {
-  console.log(`Server listening on http://${opts.host}:${PORT}`);
+  printBanner();
   checkForUpdate();
 });
 
