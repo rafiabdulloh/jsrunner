@@ -1,8 +1,3 @@
-// REST client. USE_MOCK=true resolves everything from mock.js with fake
-// latency; flip to false when the real backend lands (see brd.md contract).
-import { mock } from './mock.js';
-
-const USE_MOCK = false;
 const BASE = '/api';
 
 async function req(method, url, body) {
@@ -44,7 +39,7 @@ const real = {
   deleteGroup: (name, mode) => req('POST', '/group/delete', { name, mode }),
 };
 
-const call = (fn, ...args) => (USE_MOCK ? mock[fn](...args) : real[fn](...args));
+const call = (fn, ...args) => (real[fn](...args));
 
 export const api = {
   getProjects: () => call('getProjects'),
