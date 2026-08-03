@@ -1,6 +1,7 @@
 // Central store with topic-based pub/sub.
 const state = {
   projects: [],
+  profiles: [], // named sets of projects that start together
   recent: [], // project ids, most recent first
   collapsed: {}, // groupName -> bool
   query: '',
@@ -66,6 +67,15 @@ export function removeProject(id) {
   if (state.logProjectId === id) state.logProjectId = null;
   emit('projects');
   emit('recent');
+}
+
+export function setProfiles(list) {
+  state.profiles = list;
+  emit('profiles');
+}
+
+export function getProfile(id) {
+  return state.profiles.find((p) => p.id === id);
 }
 
 export function setQuery(q) {

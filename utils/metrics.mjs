@@ -1,130 +1,116 @@
-import { exec } from 'child_process';
+// CPU% / memory per project.
+// The tracked PID is the cmd.exe wrapper, so counters are summed over the whole
+// process tree (cmd.exe → npm → node → …) or the numbers would always read ~0.
+import os from 'os';
+import { listProcesses, collectTree } from './win-process.mjs';
 
-// Previous WMIC samples: pid -> { cpuTicks, workingSet, timestamp }
+const CORES = Math.max(1, os.cpus().length);
+
+// rootPid -> { cpu100ns, at } from the previous sample
 const prevSamples = new Map();
 
-/**
- * Query WMIC for process counters.
- * Returns null if process gone or WMIC fails.
- */
-function queryWmic(pid) {
-  const cmd =
-    `wmic path Win32_PerfRawData_PerfProc_Process where IDProcess=${pid} ` +
-    `get PercentProcessorTime,WorkingSet,Timestamp_Sys100NS /format:csv`;
-
-  return new Promise((resolve) => {
-    exec(cmd, { timeout: 5000 }, (err, stdout) => {
-      if (err) { resolve(null); return; }
-
-      const lines = stdout.trim().split('\n');
-      if (lines.length < 2) { resolve(null); return; }
-
-      // Second line is data; first is CSV header
-      const fields = lines[1].trim().split(',');
-      if (fields.length < 4) { resolve(null); return; }
-
-      try {
-        resolve({
-          cpuTicks: BigInt(fields[1].trim()),
-          workingSet: BigInt(fields[2].trim()),
-          timestamp: BigInt(fields[3].trim()),
-        });
-      } catch {
-        resolve(null);
-      }
-    });
-  });
-}
+const ZERO = { cpu: '0.0', mem: '0' };
 
 /**
- * Get CPU% (1 decimal string) and memory MB (integer string) for a PID.
- * Two-sample delta: first call stores baseline, returns zeros.
- * On error: returns zeros.
+ * Sample CPU/memory for several process trees at once.
+ * First sample for a PID is a baseline and reports zeros.
  *
- * @param {number} pid
- * @returns {Promise<{ cpu: string, mem: string }>}
+ * @param {number[]} rootPids
+ * @returns {Promise<Map<number, {cpu: string, mem: string}>>}
  */
-export async function getProcessMetrics(pid) {
-  const sample = await queryWmic(pid);
-  if (!sample) {
-    return { cpu: '0.0', mem: '0' };
+export async function sampleMetrics(rootPids) {
+  const out = new Map();
+  const pids = rootPids.filter(Boolean);
+  if (pids.length === 0) {
+    prevSamples.clear();
+    return out;
   }
 
-  const prev = prevSamples.get(pid);
-  prevSamples.set(pid, sample);
-
-  if (!prev) {
-    // Baseline sample only — no delta yet
-    return { cpu: '0.0', mem: '0' };
+  const snapshot = await listProcesses();
+  if (snapshot.size === 0) {
+    for (const pid of pids) out.set(pid, ZERO);
+    return out;
   }
 
-  const deltaCpu = Number(sample.cpuTicks - prev.cpuTicks);
-  const deltaTs  = Number(sample.timestamp - prev.timestamp);
+  const now = Date.now();
 
-  if (deltaTs <= 0) {
-    return { cpu: '0.0', mem: '0' };
+  for (const rootPid of pids) {
+    const tree = collectTree(rootPid, snapshot);
+    if (tree.length === 0) {
+      prevSamples.delete(rootPid);
+      out.set(rootPid, ZERO);
+      continue;
+    }
+
+    let cpu100ns = 0;
+    let mem = 0;
+    for (const pid of tree) {
+      const proc = snapshot.get(pid);
+      cpu100ns += proc.cpu100ns;
+      mem += proc.mem;
+    }
+
+    const memMB = Math.round(mem / (1024 * 1024)).toString();
+    const prev = prevSamples.get(rootPid);
+    prevSamples.set(rootPid, { cpu100ns, at: now });
+
+    if (!prev || now <= prev.at) {
+      out.set(rootPid, { cpu: '0.0', mem: memMB });
+      continue;
+    }
+
+    // CPU time is in 100ns units: 1 ms of CPU == 10_000 units
+    const busyMs = (cpu100ns - prev.cpu100ns) / 10_000;
+    const elapsedMs = now - prev.at;
+    const pct = Math.max(0, (busyMs / elapsedMs / CORES) * 100);
+
+    out.set(rootPid, { cpu: pct.toFixed(1), mem: memMB });
   }
 
-  const cpuPct = (deltaCpu / deltaTs) * 100;
-  const memMB  = Number(sample.workingSet) / (1024 * 1024);
+  // Drop bookkeeping for trees we no longer track
+  for (const pid of prevSamples.keys()) {
+    if (!pids.includes(pid)) prevSamples.delete(pid);
+  }
 
-  return {
-    cpu: cpuPct.toFixed(1),
-    mem: Math.round(memMB).toString(),
-  };
+  return out;
 }
 
 /**
- * Poll running processes every 3 s and collect metrics.
+ * Poll running projects and report metrics. Skips sampling entirely when
+ * nothing is running, so an idle dashboard spawns no PowerShell at all.
  *
  * @param {object} processManager - must expose getRunningProjects()
- * @param {function} [onUpdate] - called as onUpdate(id, { cpu, mem })
+ * @param {(id: string, metrics: {cpu: string, mem: string}) => void} onUpdate
+ * @param {{intervalMs?: number}} [options]
  * @returns {{ stop: () => void }}
  */
-export function startMetricsCollection(processManager, onUpdate) {
-  const timer = setInterval(async () => {
+export function startMetricsCollection(processManager, onUpdate, { intervalMs = 3000 } = {}) {
+  let running = false;
+
+  const tick = async () => {
+    if (running) return; // a slow sample must not stack up
+    running = true;
     try {
       const projects = processManager.getRunningProjects();
+      if (projects.length === 0) {
+        prevSamples.clear();
+        return;
+      }
+      const metrics = await sampleMetrics(projects.map((p) => p.pid));
       for (const p of projects) {
-        const metrics = await getProcessMetrics(p.pid);
-        if (onUpdate) onUpdate(p.id, metrics);
+        const m = metrics.get(p.pid);
+        if (m && onUpdate) onUpdate(p.id, m);
       }
     } catch {
-      // Swallow — don't crash polling loop
+      // Swallow — never break the polling loop
+    } finally {
+      running = false;
     }
-  }, 3000);
+  };
+
+  const timer = setInterval(tick, intervalMs);
+  timer.unref?.();
+  tick();
 
   return { stop: () => clearInterval(timer) };
-}
-
-/**
- * Return a copy of `project` with cpu/mem fields added.
- *
- * @param {object} project
- * @param {number} pid
- * @returns {Promise<object>}
- */
-export async function addMetricsToProject(project, pid) {
-  const { cpu, mem } = await getProcessMetrics(pid);
-  return { ...project, cpu, mem };
-}
-
-/**
- * Convenience — return CPU% string for a PID.
- * @param {number} pid
- * @returns {Promise<string>}
- */
-export async function getCpu(pid) {
-  const m = await getProcessMetrics(pid);
-  return m.cpu;
-}
-
-/**
- * Convenience — return memory string for a PID.
- * @param {number} pid
- * @returns {Promise<string>}
- */
-export async function getMem(pid) {
-  const m = await getProcessMetrics(pid);
-  return m.mem;
 }

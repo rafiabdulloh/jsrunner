@@ -1,5 +1,5 @@
-import { existsSync, readFileSync, readdirSync } from 'fs';
-import { join, dirname, basename, resolve } from 'path';
+import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
+import { join, dirname, basename, resolve, relative } from 'path';
 
 /**
  * Detect framework from dependencies/devDependencies.
@@ -254,4 +254,128 @@ export function scanProject(folderPath) {
  */
 export function rescan(folderPath) {
   return scanProject(folderPath);
+}
+
+// Folders never worth walking into when looking for services.
+const SKIP_DIRS = new Set([
+  'node_modules', 'dist', 'build', 'out', 'coverage', 'tmp', 'temp', 'logs',
+  'vendor', 'target', 'bin', 'obj', 'public', 'static', 'assets',
+  '__pycache__', 'venv', 'env',
+]);
+
+// Guard rails so a wrong path (e.g. C:/) can't hang the server.
+const MAX_SERVICES = 300;
+const MAX_DIRS = 8000;
+
+// Scripts that mean "this package can be run as a service".
+const RUN_SCRIPTS = ['dev', 'start', 'serve', 'develop'];
+
+function isRunnable(scripts) {
+  return scripts.some((s) => RUN_SCRIPTS.includes(s) || /^(dev|start|serve):/.test(s));
+}
+
+/**
+ * Describe one package.json folder as a service candidate.
+ */
+function describeService(folder, rootFolder) {
+  const meta = scanProject(folder);
+  let subProjects = [];
+  let workspaces = false;
+  try {
+    const pkg = JSON.parse(readFileSync(join(folder, 'package.json'), 'utf-8'));
+    workspaces = Array.isArray(pkg.workspaces) && pkg.workspaces.length > 0;
+    subProjects = detectSubProjects(pkg, folder);
+  } catch {
+    // unreadable/invalid package.json — keep the candidate without sub-projects
+  }
+
+  const rel = relative(rootFolder, folder).replace(/\\/g, '/') || '.';
+  return {
+    name: meta.name,
+    version: meta.version,
+    folder: meta.folder,
+    path: meta.path,
+    relative: rel,
+    framework: meta.framework,
+    pm: meta.pm,
+    port: meta.port,
+    scripts: meta.scripts,
+    subProjects,
+    workspaces,
+    isRoot: rel === '.',
+    runnable: isRunnable(meta.scripts),
+  };
+}
+
+/**
+ * Walk a folder/workspace and return every package.json inside it as a
+ * service candidate. Depth is counted in directory levels below the root.
+ *
+ * @param {string} rootFolder
+ * @param {{maxDepth?: number}} [options]
+ * @returns {{root: string, name: string, services: Array<object>, truncated: boolean}}
+ */
+export function scanWorkspace(rootFolder, { maxDepth = 3 } = {}) {
+  if (!existsSync(rootFolder)) {
+    throw new Error('Folder not found');
+  }
+  try {
+    if (!statSync(rootFolder).isDirectory()) {
+      throw new Error('Path is not a folder');
+    }
+  } catch (err) {
+    if (err.message === 'Path is not a folder') throw err;
+    throw new Error('Folder not readable');
+  }
+
+  const services = [];
+  let dirsVisited = 0;
+  let truncated = false;
+
+  const walk = (folder, depth) => {
+    if (services.length >= MAX_SERVICES || dirsVisited >= MAX_DIRS) {
+      truncated = true;
+      return;
+    }
+    dirsVisited++;
+
+    if (existsSync(join(folder, 'package.json'))) {
+      try {
+        services.push(describeService(folder, rootFolder));
+      } catch {
+        // invalid package.json — not a usable candidate, keep walking
+      }
+    }
+
+    if (depth >= maxDepth) return;
+
+    let entries;
+    try {
+      entries = readdirSync(folder, { withFileTypes: true });
+    } catch {
+      return; // permission denied — skip quietly
+    }
+
+    for (const entry of entries) {
+      // isDirectory() is false for symlinks, which also keeps us loop-free
+      if (!entry.isDirectory()) continue;
+      if (entry.name.startsWith('.') || SKIP_DIRS.has(entry.name)) continue;
+      walk(join(folder, entry.name), depth + 1);
+    }
+  };
+
+  walk(rootFolder, 0);
+
+  // Root first, then alphabetical by relative path
+  services.sort((a, b) => {
+    if (a.isRoot !== b.isRoot) return a.isRoot ? -1 : 1;
+    return a.relative.localeCompare(b.relative);
+  });
+
+  return {
+    root: rootFolder,
+    name: basename(rootFolder) || rootFolder,
+    services,
+    truncated,
+  };
 }

@@ -2,6 +2,8 @@ import path from 'path';
 import fs from 'fs';
 import * as config from '../utils/config.mjs';
 import * as scanner from '../utils/scanner.mjs';
+import { buildProject, toFolder, isDuplicate } from '../utils/project-factory.mjs';
+import { removeProjectFromProfiles } from '../utils/profiles.mjs';
 
 function sendJSON(res, status, data) {
   const body = JSON.stringify(data);
@@ -25,10 +27,11 @@ function collectBody(req) {
   });
 }
 
-export function registerProjectRoutes(router) {
+export function registerProjectRoutes(router, supervisor) {
   router.get('/api/projects', async (req, res, ctx) => {
-    const projects = config.getProjects();
-    sendJSON(res, 200, projects);
+    // Reconciled against live process state — a crashed service must not keep
+    // reporting "running" just because that is what config still says.
+    sendJSON(res, 200, supervisor.reconcile());
   });
 
   router.post('/api/project', async (req, res, ctx) => {
@@ -40,57 +43,31 @@ export function registerProjectRoutes(router) {
       return;
     }
 
-    // Normalize backslashes to forward slashes (Windows sends D:/path, config stores D:\path from path.join)
-    const inputPath = body.path.replace(/\\/g, '/');
-    if (!inputPath || typeof inputPath !== 'string' || !inputPath.endsWith('package.json')) {
-      sendJSON(res, 400, { error: 'Invalid path. Must end with package.json' });
+    if (!body.path || typeof body.path !== 'string' || !body.path.trim()) {
+      sendJSON(res, 400, { error: 'Path is required' });
       return;
     }
 
-    const folderPath = path.dirname(inputPath);
-    if (!fs.existsSync(folderPath)) {
+    // Accepts a folder or a .../package.json path
+    const folderPath = toFolder(body.path.trim());
+    if (!fs.existsSync(path.join(folderPath, 'package.json'))) {
       sendJSON(res, 404, { error: 'Package.json not found' });
       return;
     }
 
     // Duplicate check (normalize stored paths too — path.join uses backslashes on Windows)
-    const existing = config.getProjects();
-    if (existing.some(p => p.path.replace(/\\/g, '/') === inputPath)) {
+    if (isDuplicate(path.join(folderPath, 'package.json'), config.getProjects())) {
       sendJSON(res, 409, { error: 'Project already exists' });
       return;
     }
 
-    let meta;
-    let subProjects = [];
+    let project;
     try {
-      meta = scanner.scanProject(folderPath);
-      const rawPkg = JSON.parse(fs.readFileSync(path.join(folderPath, 'package.json'), 'utf-8'));
-      subProjects = scanner.detectSubProjects(rawPkg, folderPath);
+      project = buildProject(folderPath, { group: body.group, pm: body.pm });
     } catch (err) {
       sendJSON(res, 500, { error: err.message });
       return;
     }
-
-    const projects = config.getProjects();
-    // Generate a harmonious random color
-    const hue = Math.floor(Math.random() * 360);
-    const color = `hsl(${hue}, 55%, 45%)`;
-    const project = {
-      id: config.nextId(),
-      name: meta.name,
-      group: body.group || null,
-      framework: meta.framework,
-      pm: body.pm || meta.pm,
-      folder: meta.folder,
-      path: meta.path,
-      port: meta.port,
-      scripts: meta.scripts,
-      subProjects,
-      color,
-      status: 'stopped',
-      pid: null,
-      startedAt: null,
-    };
 
     config.addProject(project);
     sendJSON(res, 201, project);
@@ -157,6 +134,8 @@ export function registerProjectRoutes(router) {
       return;
     }
     config.deleteProject(id);
+    // Keep profiles from carrying dead references
+    removeProjectFromProfiles(id);
     sendJSON(res, 200, { ok: true });
   });
 }

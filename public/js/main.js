@@ -5,20 +5,28 @@ import { on, getState, setProjects, updateProject } from './state.js';
 import { renderGroups, startGroup, stopGroup, restartGroup } from './groups.js';
 import { patchCard, startUptimeTicker } from './cards.js';
 import { renderRecent } from './recent.js';
+import { initProfiles, renderProfiles, refreshProfileCounts, loadProfiles } from './profiles.js';
 import { initSearch } from './search.js';
-import { syncLogPanel } from './logs.js';
+import { syncLogPanel, notifyLogUpdate } from './logs.js';
 import { openAddProjectDialog } from './dialogs.js';
 import { toastError, toastInfo } from './toast.js';
+import { connectEvents } from './events.js';
 
 const main = document.querySelector('#groups');
 const recentStrip = document.querySelector('#recent');
+const profileStrip = document.querySelector('#profiles');
 
 // Structural re-render on project list / search / collapse changes.
 on('projects', () => {
   renderGroups(main);
+  renderProfiles(); // running counts on the chips
   syncLogPanel();
 });
-on('project', (p) => patchCard(p));
+on('project', (p) => {
+  patchCard(p);
+  refreshProfileCounts();
+});
+on('profiles', () => renderProfiles());
 on('recent', () => renderRecent(recentStrip));
 
 // Crash / auto-restart notifications from the status poll.
@@ -37,21 +45,34 @@ function wireHeader() {
   initSearch(document.querySelector('#search'));
 }
 
+// Merge a fresh project list into the store, re-rendering structurally only
+// when the set of cards actually changed (avoids hover flicker).
+function applyProjects(list) {
+  const cur = getState().projects;
+  const structural =
+    list.length !== cur.length || list.some((p) => !cur.some((c) => c.id === p.id));
+  if (structural) {
+    setProjects(list);
+  } else {
+    for (const p of list) updateProject(p, { structural: false });
+  }
+}
+
 async function pollStatuses() {
   try {
-    const list = await api.getProjects();
-    const cur = getState().projects;
-    const structural =
-      list.length !== cur.length || list.some((p) => !cur.some((c) => c.id === p.id));
-    if (structural) {
-      setProjects(list);
-    } else {
-      // Patch in place: avoids a full re-render (and hover flicker) every 2s.
-      for (const p of list) updateProject(p, { structural: false });
-    }
+    applyProjects(await api.getProjects());
   } catch (err) {
     toastError(err.message);
   }
+}
+
+function setLiveIndicator(state) {
+  const el = document.querySelector('#live-status');
+  if (!el) return;
+  el.dataset.state = state;
+  el.title = state === 'live'
+    ? 'Live updates via server-sent events'
+    : 'Event stream unavailable — falling back to polling every 2s';
 }
 
 async function boot() {
@@ -63,7 +84,16 @@ async function boot() {
     toastError(err.message);
   }
   renderRecent(recentStrip);
-  setInterval(pollStatuses, 2000);
+  initProfiles(profileStrip);
+  await loadProfiles();
+
+  // Push instead of poll; the fallback ticker only runs if the stream drops.
+  connectEvents({
+    onProjects: applyProjects,
+    onLogs: (batch) => notifyLogUpdate(batch.map((b) => b.id)),
+    onFallbackTick: pollStatuses,
+    onStatus: setLiveIndicator,
+  });
 }
 
 // Icons referenced in index.html static markup are injected here to keep

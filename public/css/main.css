@@ -138,6 +138,40 @@ body {
   flex-wrap: wrap;
 }
 
+/* Profile strip */
+.profiles {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.profiles[hidden] {
+  display: none;
+}
+
+.profiles__label {
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.profiles__hint {
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.profiles__add {
+  white-space: nowrap;
+  flex: none;
+}
+
 /* Recent strip */
 .recent {
   display: flex;

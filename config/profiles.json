@@ -1,0 +1,25 @@
+[
+  {
+    "id": "pf_ms8gz547_0",
+    "name": "Full Local Mini Ticast",
+    "projectIds": [
+      "p_ms8ds8ge_11",
+      "p_ms8ds8gw_13",
+      "p_ms8ds8dy_1",
+      "p_ms8ds8h5_14",
+      "p_ms8ds8eg_3",
+      "p_ms8ds8e7_2",
+      "p_ms8ds8eo_4",
+      "p_ms8ds8ew_5",
+      "p_ms8ds8f4_6",
+      "p_ms8ds8gn_12",
+      "p_ms8ds8fm_8",
+      "p_ms8ds8fd_7",
+      "p_ms8ds8fw_9",
+      "p_ms8ds8g4_10",
+      "p_ms8ds8dq_0"
+    ],
+    "mode": "parallel",
+    "color": "hsl(210, 60%, 50%)"
+  }
+]

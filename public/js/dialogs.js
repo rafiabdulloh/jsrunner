@@ -8,12 +8,12 @@ import { getProject, updateProject, addProject, removeProject, getState } from '
 const esc = (s) =>
   String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-function openModal({ title, bodyHtml, actions, onOpen }) {
+function openModal({ title, bodyHtml, actions, onOpen, wide = false }) {
   const opener = document.activeElement;
   const backdrop = document.createElement('div');
   backdrop.className = 'modal-backdrop';
   backdrop.innerHTML = `
-    <div class="modal" role="dialog" aria-modal="true" aria-label="${title}">
+    <div class="modal ${wide ? 'modal--wide' : ''}" role="dialog" aria-modal="true" aria-label="${title}">
       <div class="modal__header">
         <span class="modal__title">${title}</span>
         <button class="btn btn--sm btn--icon" data-mact="close" title="Close">${icons.x}</button>
@@ -40,17 +40,29 @@ function openModal({ title, bodyHtml, actions, onOpen }) {
   backdrop.querySelector('[data-mact="close"]').addEventListener('click', close);
 
   const footer = backdrop.querySelector('.modal__footer');
-  for (const a of actions) {
-    const btn = document.createElement('button');
-    btn.className = `btn ${a.primary ? 'btn--primary' : ''} ${a.danger ? 'btn--danger' : ''}`;
-    btn.textContent = a.label;
-    btn.addEventListener('click', () => a.onClick({ backdrop, close, btn }));
-    footer.appendChild(btn);
-  }
+  const setActions = (list) => {
+    footer.innerHTML = '';
+    for (const a of list) {
+      const btn = document.createElement('button');
+      btn.className = `btn ${a.primary ? 'btn--primary' : ''} ${a.danger ? 'btn--danger' : ''}`;
+      btn.textContent = a.label;
+      btn.addEventListener('click', () => a.onClick({ backdrop, close, btn }));
+      footer.appendChild(btn);
+    }
+  };
+  setActions(actions);
+
+  // Swap body + footer in place — used by multi-step dialogs (Add Project)
+  const setStep = ({ title: newTitle, bodyHtml: html, actions: acts, onOpen: after }) => {
+    if (newTitle) backdrop.querySelector('.modal__title').textContent = newTitle;
+    backdrop.querySelector('.modal__body').innerHTML = html;
+    setActions(acts);
+    after?.(backdrop);
+  };
 
   document.body.appendChild(backdrop);
   onOpen?.(backdrop);
-  return { backdrop, close };
+  return { backdrop, close, setStep };
 }
 
 const field = (label, inner) => `
@@ -111,40 +123,625 @@ function groupInput(name, value = '') {
 }
 
 // ---------- Add Project ----------
+// Step 1: point at a folder/workspace. Step 2: pick which services to add.
 export function openAddProjectDialog() {
-  openModal({
+  const modal = openModal({
     title: 'Add Project',
+    wide: true,
     bodyHtml:
-      field('package.json path', input('path', '', 'D:/path/to/project/package.json')) +
-      field('Package manager', input('pm', '', 'npm, yarn, pnpm, bun (auto-detected if empty)')) +
-      field('Group (optional)', groupInput('group')) +
+      field('Project / workspace folder', input('path', '', 'D:/Works/Neuron/my-workspace')) +
+      field('Scan depth', `
+        <select class="field__input field__select" name="depth">
+          <option value="1">1 level — direct sub-folders</option>
+          <option value="2">2 levels</option>
+          <option value="3" selected>3 levels (recommended)</option>
+          <option value="4">4 levels — slower</option>
+        </select>`) +
+      '<p class="modal__hint">Every <code>package.json</code> inside the folder is detected as a service. ' +
+      'You choose which ones to add on the next step.</p>' +
       '<span class="field__error"></span>',
     actions: [
       { label: 'Cancel', onClick: ({ close }) => close() },
       {
-        label: 'Scan & Add',
+        label: 'Scan Folder',
+        primary: true,
+        onClick: ({ backdrop, btn }) => runScan(backdrop, btn),
+      },
+    ],
+    onOpen: (b) => {
+      const inp = b.querySelector('[name="path"]');
+      inp.focus();
+      inp.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') b.querySelector('.modal__footer .btn--primary')?.click();
+      });
+    },
+  });
+
+  async function runScan(backdrop, btn) {
+    const path = backdrop.querySelector('[name="path"]').value.trim();
+    if (!path) return setError(backdrop, 'Folder path is required');
+    const depth = Number(backdrop.querySelector('[name="depth"]').value);
+    busy(btn, 'Scanning…');
+    try {
+      const result = await api.scanWorkspace(path, depth);
+      showPicker(result, path, depth);
+    } catch (err) {
+      setError(backdrop, err.message);
+      toastError(err.message);
+      btn.disabled = false;
+      btn.textContent = 'Scan Folder';
+    }
+  }
+
+  function showPicker(result, path, depth) {
+    const selectable = result.services.filter((s) => !s.added);
+
+    modal.setStep({
+      title: `Add Services — ${result.name}`,
+      bodyHtml:
+        `<div class="scan__summary">
+          <span class="scan__root" title="${esc(result.root)}">${esc(result.root)}</span>
+          <span>${result.services.length} service${result.services.length === 1 ? '' : 's'} found ·
+            ${selectable.length} available${result.truncated ? ' · scan truncated' : ''}</span>
+        </div>` +
+        `<div class="scan__toolbar">
+          <button class="btn btn--sm" data-sact="all">Select all</button>
+          <button class="btn btn--sm" data-sact="none">Select none</button>
+          <button class="btn btn--sm" data-sact="runnable">Only runnable</button>
+          <span class="scan__count"></span>
+        </div>` +
+        `<div class="scan__list">${result.services.map(serviceRow).join('')}</div>` +
+        field('Group for added services', groupInput('group', result.name)) +
+        '<span class="field__error"></span>',
+      actions: [
+        { label: 'Back', onClick: () => modal.setStep(step1(path, depth)) },
+        {
+          label: 'Add Selected',
+          primary: true,
+          onClick: async ({ backdrop, close, btn }) => {
+            const picked = [...backdrop.querySelectorAll('.scan__check:checked')].map((c) => c.value);
+            if (picked.length === 0) return setError(backdrop, 'Select at least one service');
+            const group = groupValue(backdrop);
+            busy(btn, `Adding ${picked.length}…`);
+            try {
+              const { added, skipped } = await api.addWorkspaceServices(picked, group || undefined);
+              added.forEach(addProject);
+              toastSuccess(`${added.length} service${added.length === 1 ? '' : 's'} added`);
+              if (skipped.length) toastError(`${skipped.length} skipped: ${skipped[0].reason}`);
+              close();
+            } catch (err) {
+              setError(backdrop, err.message);
+              toastError(err.message);
+              btn.disabled = false;
+              btn.textContent = 'Add Selected';
+            }
+          },
+        },
+      ],
+      onOpen: (b) => {
+        wireGroupPicker(b);
+        const checks = [...b.querySelectorAll('.scan__check:not([disabled])')];
+        const countEl = b.querySelector('.scan__count');
+        const sync = () => {
+          const n = checks.filter((c) => c.checked).length;
+          countEl.textContent = `${n} selected`;
+        };
+        checks.forEach((c) => c.addEventListener('change', sync));
+        b.querySelector('[data-sact="all"]').addEventListener('click', () => {
+          checks.forEach((c) => { c.checked = true; });
+          sync();
+        });
+        b.querySelector('[data-sact="none"]').addEventListener('click', () => {
+          checks.forEach((c) => { c.checked = false; });
+          sync();
+        });
+        b.querySelector('[data-sact="runnable"]').addEventListener('click', () => {
+          checks.forEach((c) => { c.checked = c.dataset.runnable === '1'; });
+          sync();
+        });
+        sync();
+      },
+    });
+  }
+
+  // Rebuilt lazily so "Back" keeps whatever the user typed
+  function step1(path, depth) {
+    return {
+      title: 'Add Project',
+      bodyHtml:
+        field('Project / workspace folder', input('path', esc(path), 'D:/Works/Neuron/my-workspace')) +
+        field('Scan depth', `
+          <select class="field__input field__select" name="depth">
+            ${[1, 2, 3, 4].map((d) => `<option value="${d}" ${d === depth ? 'selected' : ''}>${d} level${d === 1 ? '' : 's'}</option>`).join('')}
+          </select>`) +
+        '<span class="field__error"></span>',
+      actions: [
+        { label: 'Cancel', onClick: ({ close }) => close() },
+        { label: 'Scan Folder', primary: true, onClick: ({ backdrop, btn }) => runScan(backdrop, btn) },
+      ],
+      onOpen: (b) => b.querySelector('[name="path"]').focus(),
+    };
+  }
+}
+
+// One row in the scan result list
+function serviceRow(s) {
+  const badges = [
+    s.framework && s.framework !== 'Unknown' ? `<span class="scan__badge">${esc(s.framework)}</span>` : '',
+    `<span class="scan__badge">${esc(s.pm)}</span>`,
+    s.port ? `<span class="scan__badge">:${s.port}</span>` : '',
+    s.workspaces ? '<span class="scan__badge scan__badge--info">monorepo root</span>' : '',
+    s.runnable ? '' : '<span class="scan__badge scan__badge--muted">no run script</span>',
+    s.added ? '<span class="scan__badge scan__badge--muted">already added</span>' : '',
+  ].join('');
+
+  const checked = !s.added && s.runnable ? 'checked' : '';
+  return `
+    <label class="scan__item ${s.added ? 'scan__item--disabled' : ''}">
+      <input type="checkbox" class="scan__check" value="${esc(s.path)}"
+        data-runnable="${s.runnable ? 1 : 0}" ${checked} ${s.added ? 'disabled' : ''}>
+      <span class="scan__info">
+        <span class="scan__name">${esc(s.name)}</span>
+        <span class="scan__path">${s.isRoot ? 'root folder' : esc(s.relative)}</span>
+        <span class="scan__badges">${badges}</span>
+      </span>
+    </label>`;
+}
+
+// ---------- Profile (create / edit) ----------
+// A profile is a named set of projects that start together, across groups.
+export function openProfileDialog(profile = null) {
+  const editing = Boolean(profile);
+  const selected = new Set(profile?.projectIds || []);
+  const projects = [...getState().projects];
+
+  if (projects.length === 0) {
+    openModal({
+      title: 'New Profile',
+      bodyHtml: '<p>Add some projects first — a profile is a set of projects that start together.</p>',
+      actions: [{ label: 'Close', primary: true, onClick: ({ close }) => close() }],
+    });
+    return;
+  }
+
+  // Grouped so picking across groups is obvious
+  const byGroup = new Map();
+  for (const p of projects.sort((a, b) => a.name.localeCompare(b.name))) {
+    const key = p.group || 'Ungrouped';
+    if (!byGroup.has(key)) byGroup.set(key, []);
+    byGroup.get(key).push(p);
+  }
+  const sections = [...byGroup.entries()].sort(([a], [b]) =>
+    a === 'Ungrouped' ? 1 : b === 'Ungrouped' ? -1 : a.localeCompare(b)
+  );
+
+  // Selection order is the start order; edit keeps whatever was saved
+  const order = (profile?.projectIds || []).filter((id) => projects.some((p) => p.id === id));
+  const mode = profile?.mode === 'sequential' ? 'sequential' : 'parallel';
+
+  openModal({
+    title: editing ? `Edit Profile — ${profile.name}` : 'New Profile',
+    wide: true,
+    bodyHtml:
+      field('Profile name', input('name', esc(profile?.name || ''), 'e.g. POS demo')) +
+      field('Start mode',
+        `<select class="field__input field__select" name="mode">
+          <option value="parallel" ${mode === 'parallel' ? 'selected' : ''}>Parallel — start everything at once</option>
+          <option value="sequential" ${mode === 'sequential' ? 'selected' : ''}>Sequential — one at a time, in order</option>
+        </select>`) +
+      '<p class="modal__hint" data-mode-hint></p>' +
+      `<div class="scan__toolbar">
+        <span class="field__label">Projects</span>
+        <button class="btn btn--sm" data-pfact="none" type="button">Clear all</button>
+        <span class="scan__count"></span>
+      </div>` +
+      `<div class="scan__list">${sections.map(([group, list]) => `
+        <div class="profile__group">${esc(group)}</div>
+        ${list.map((p) => `
+          <label class="scan__item">
+            <input type="checkbox" class="pf__check" value="${esc(p.id)}" ${selected.has(p.id) ? 'checked' : ''}>
+            <span class="scan__info">
+              <span class="scan__name">${esc(p.name)}</span>
+              <span class="scan__badges">
+                <span class="scan__badge">${esc(p.framework)}</span>
+                ${p.port ? `<span class="scan__badge">:${p.port}</span>` : '<span class="scan__badge scan__badge--muted">no port</span>'}
+                ${p.dependsOn?.length ? `<span class="scan__badge scan__badge--info">${p.dependsOn.length} dep${p.dependsOn.length === 1 ? '' : 's'}</span>` : ''}
+              </span>
+            </span>
+          </label>`).join('')}`).join('')}</div>` +
+      '<div class="order" data-order-wrap>' +
+        '<span class="field__label">Start order</span>' +
+        '<div class="order__list" data-order-list></div>' +
+      '</div>' +
+      '<span class="field__error"></span>',
+    actions: [
+      { label: 'Cancel', onClick: ({ close }) => close() },
+      {
+        label: editing ? 'Save' : 'Create',
         primary: true,
         onClick: async ({ backdrop, close, btn }) => {
-          const path = backdrop.querySelector('[name="path"]').value.trim();
-          if (!path) return setError(backdrop, 'Path is required');
-          const pm = backdrop.querySelector('[name="pm"]')?.value.trim() || '';
-          const group = groupValue(backdrop);
-          busy(btn, 'Scanning…');
+          const name = backdrop.querySelector('[name="name"]').value.trim();
+          if (!name) return setError(backdrop, 'Profile name is required');
+          if (order.length === 0) return setError(backdrop, 'Select at least one project');
+          const chosenMode = backdrop.querySelector('[name="mode"]').value;
+
+          busy(btn, 'Saving…');
           try {
-            const project = await api.addProject(path, group || undefined, pm || undefined);
-            addProject(project);
-            toastSuccess(`Project "${project.name}" added`);
+            if (editing) {
+              await api.updateProfileById(profile.id, name, order, chosenMode);
+              toastSuccess(`Profile "${name}" updated`);
+            } else {
+              await api.createProfile(name, order, chosenMode);
+              toastSuccess(`Profile "${name}" created`);
+            }
+            close();
+            const { loadProfiles } = await import('./profiles.js');
+            await loadProfiles();
+          } catch (err) {
+            setError(backdrop, err.message);
+            toastError(err.message);
+            btn.disabled = false;
+            btn.textContent = editing ? 'Save' : 'Create';
+          }
+        },
+      },
+    ],
+    onOpen: (b) => {
+      const checks = [...b.querySelectorAll('.pf__check')];
+      const countEl = b.querySelector('.scan__count');
+      const listEl = b.querySelector('[data-order-list]');
+      const wrapEl = b.querySelector('[data-order-wrap]');
+      const hintEl = b.querySelector('[data-mode-hint]');
+      const modeEl = b.querySelector('[name="mode"]');
+      const nameOf = (id) => projects.find((p) => p.id === id)?.name || id;
+
+      const renderOrder = () => {
+        const sequential = modeEl.value === 'sequential';
+        countEl.textContent = `${order.length} selected`;
+
+        hintEl.innerHTML = sequential
+          ? 'Each service must be <strong>ready</strong> (its port answering) before the next one starts. ' +
+            'A service without a port cannot be probed, so the next one follows immediately.'
+          : 'Everything starts at once. Dependencies are still honoured — a member waits only for ' +
+            'the projects it actually depends on.';
+
+        wrapEl.classList.toggle('order--inactive', !sequential);
+        listEl.replaceChildren();
+
+        if (order.length === 0) {
+          const empty = document.createElement('span');
+          empty.className = 'order__empty';
+          empty.textContent = 'Nothing selected yet.';
+          listEl.appendChild(empty);
+          return;
+        }
+
+        order.forEach((id, i) => {
+          const row = document.createElement('div');
+          row.className = 'order__row';
+          row.draggable = true;
+          row.dataset.index = String(i);
+          row.innerHTML = `
+            <span class="order__grip" aria-hidden="true">⠿</span>
+            <span class="order__index">${i + 1}</span>
+            <span class="order__name">${esc(nameOf(id))}</span>
+            <button class="btn btn--sm btn--icon" data-move="up" ${i === 0 ? 'disabled' : ''}
+              title="Move up" type="button">↑</button>
+            <button class="btn btn--sm btn--icon" data-move="down" ${i === order.length - 1 ? 'disabled' : ''}
+              title="Move down" type="button">↓</button>`;
+
+          // Buttons stay for keyboard users and precise single steps
+          row.querySelectorAll('[data-move]').forEach((mb) => {
+            mb.addEventListener('click', () => {
+              const to = mb.dataset.move === 'up' ? i - 1 : i + 1;
+              if (to < 0 || to >= order.length) return;
+              [order[i], order[to]] = [order[to], order[i]];
+              renderOrder();
+            });
+          });
+
+          listEl.appendChild(row);
+        });
+      };
+
+      // ---- Drag to reorder ----
+      // The list is only rebuilt on drop, so the dragged node stays alive for
+      // the whole gesture.
+      let dragFrom = null;
+
+      const clearDropMarks = () => {
+        listEl.querySelectorAll('.order__row').forEach((r) => {
+          r.classList.remove('order__row--drop-above', 'order__row--drop-below');
+        });
+      };
+
+      listEl.addEventListener('dragstart', (e) => {
+        const row = e.target.closest('.order__row');
+        if (!row) return;
+        dragFrom = Number(row.dataset.index);
+        row.classList.add('order__row--dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        // Firefox refuses to start a drag without payload
+        e.dataTransfer.setData('text/plain', String(dragFrom));
+      });
+
+      listEl.addEventListener('dragover', (e) => {
+        if (dragFrom === null) return;
+        const row = e.target.closest('.order__row');
+        if (!row) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+
+        const to = Number(row.dataset.index);
+        clearDropMarks();
+        if (to === dragFrom) return;
+        // Indicator on the side the row will be inserted
+        const rect = row.getBoundingClientRect();
+        const below = e.clientY > rect.top + rect.height / 2;
+        row.classList.add(below ? 'order__row--drop-below' : 'order__row--drop-above');
+      });
+
+      listEl.addEventListener('drop', (e) => {
+        if (dragFrom === null) return;
+        const row = e.target.closest('.order__row');
+        if (!row) return;
+        e.preventDefault();
+
+        const over = Number(row.dataset.index);
+        const rect = row.getBoundingClientRect();
+        const below = e.clientY > rect.top + rect.height / 2;
+        let to = below ? over + 1 : over;
+        // Removing the dragged item first shifts everything after it down one
+        if (dragFrom < to) to -= 1;
+
+        const [moved] = order.splice(dragFrom, 1);
+        order.splice(Math.max(0, Math.min(to, order.length)), 0, moved);
+        dragFrom = null;
+        renderOrder();
+      });
+
+      listEl.addEventListener('dragend', () => {
+        dragFrom = null;
+        listEl.querySelector('.order__row--dragging')?.classList.remove('order__row--dragging');
+        clearDropMarks();
+      });
+
+      // Dropping outside a row must not leave the list in dragging state
+      listEl.addEventListener('dragleave', (e) => {
+        if (!listEl.contains(e.relatedTarget)) clearDropMarks();
+      });
+
+      checks.forEach((c) => c.addEventListener('change', () => {
+        // Newly checked projects go to the end of the start order
+        if (c.checked) {
+          if (!order.includes(c.value)) order.push(c.value);
+        } else {
+          const at = order.indexOf(c.value);
+          if (at !== -1) order.splice(at, 1);
+        }
+        renderOrder();
+      }));
+
+      modeEl.addEventListener('change', renderOrder);
+      b.querySelector('[data-pfact="none"]').addEventListener('click', () => {
+        checks.forEach((c) => { c.checked = false; });
+        order.length = 0;
+        renderOrder();
+      });
+
+      renderOrder();
+      b.querySelector('[name="name"]').focus();
+    },
+  });
+}
+
+// ---------- Delete Profile ----------
+export function openDeleteProfileDialog(profile) {
+  openModal({
+    title: `Delete Profile — ${profile.name}`,
+    bodyHtml: `<p>Remove the profile <strong>${esc(profile.name)}</strong>? ` +
+      'The projects themselves stay on the dashboard and keep running.</p>',
+    actions: [
+      { label: 'Cancel', onClick: ({ close }) => close() },
+      {
+        label: 'Delete',
+        danger: true,
+        onClick: async ({ close, btn }) => {
+          busy(btn, 'Deleting…');
+          try {
+            await api.deleteProfile(profile.id);
+            toastSuccess(`Profile "${profile.name}" deleted`);
+            close();
+            const { loadProfiles } = await import('./profiles.js');
+            await loadProfiles();
+          } catch (err) {
+            toastError(err.message);
+            btn.disabled = false;
+            btn.textContent = 'Delete';
+          }
+        },
+      },
+    ],
+  });
+}
+
+// ---------- Run Settings ----------
+// Which script/command Start runs, plus extra environment variables.
+export function openRunSettingsDialog(id) {
+  const p = getProject(id);
+  if (!p) return;
+
+  const scripts = p.scripts || [];
+  const envText = Object.entries(p.env || {}).map(([k, v]) => `${k}=${v}`).join('\n');
+  const autoPick = scripts.includes('dev') ? 'dev' : scripts.includes('start') ? 'start' : scripts[0] || '—';
+
+  openModal({
+    title: `Run Settings — ${p.name}`,
+    wide: true,
+    bodyHtml:
+      field('Start script',
+        `<select class="field__input field__select" name="runScript">
+          <option value="">Auto — ${esc(autoPick)}</option>
+          ${scripts.map((s) => `<option value="${esc(s)}" ${p.runScript === s ? 'selected' : ''}>${esc(s)}</option>`).join('')}
+        </select>`) +
+      field('Custom command (overrides the script)',
+        `<input class="field__input" name="command" value="${esc(p.command || '')}"
+          placeholder="e.g. node server.js --inspect" spellcheck="false">`) +
+      field('Environment variables (KEY=value, one per line)',
+        `<textarea class="field__input field__textarea" name="env" rows="5"
+          placeholder="PORT=4000&#10;NODE_ENV=development" spellcheck="false">${esc(envText)}</textarea>`) +
+      `<p class="modal__hint">Runs as <code>${esc(p.pm)}</code> in <code>${esc(p.folder)}</code>. ` +
+      'Changes apply the next time the project starts.</p>' +
+      '<span class="field__error"></span>',
+    actions: [
+      { label: 'Cancel', onClick: ({ close }) => close() },
+      {
+        label: 'Save',
+        primary: true,
+        onClick: async ({ backdrop, close, btn }) => {
+          const runScript = backdrop.querySelector('[name="runScript"]').value;
+          const command = backdrop.querySelector('[name="command"]').value.trim();
+          const envRaw = backdrop.querySelector('[name="env"]').value;
+
+          const env = {};
+          for (const raw of envRaw.split('\n')) {
+            const line = raw.trim();
+            if (!line || line.startsWith('#')) continue;
+            const eq = line.indexOf('=');
+            if (eq < 1) return setError(backdrop, `Invalid line: "${line}" — use KEY=value`);
+            const key = line.slice(0, eq).trim();
+            if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+              return setError(backdrop, `Invalid variable name: "${key}"`);
+            }
+            env[key] = line.slice(eq + 1).trim();
+          }
+
+          busy(btn, 'Saving…');
+          try {
+            const updated = await api.setRunConfig(id, { runScript, command, env });
+            updateProject(updated, { structural: false });
+            toastSuccess(updated.restartRequired ? 'Saved — restart to apply' : 'Run settings saved');
             close();
           } catch (err) {
             setError(backdrop, err.message);
             toastError(err.message);
             btn.disabled = false;
-            btn.textContent = 'Scan & Add';
+            btn.textContent = 'Save';
           }
         },
       },
     ],
-    onOpen: (b) => { b.querySelector('[name="path"]').focus(); wireGroupPicker(b); },
+    onOpen: (b) => b.querySelector('[name="runScript"]').focus(),
+  });
+}
+
+// ---------- Dependencies ----------
+// Start order: these projects must be listening before this one starts.
+export function openDependenciesDialog(id) {
+  const p = getProject(id);
+  if (!p) return;
+
+  const others = getState().projects.filter((x) => x.id !== id);
+  const current = new Set(p.dependsOn || []);
+
+  if (others.length === 0) {
+    openModal({
+      title: `Dependencies — ${p.name}`,
+      bodyHtml: '<p>Add another project first — dependencies point at other projects on this dashboard.</p>',
+      actions: [{ label: 'Close', primary: true, onClick: ({ close }) => close() }],
+    });
+    return;
+  }
+
+  openModal({
+    title: `Dependencies — ${p.name}`,
+    wide: true,
+    bodyHtml:
+      '<p class="modal__hint">Starting <strong>' + esc(p.name) + '</strong> will start these first and wait until ' +
+      'each one answers on its port (projects without a port are only started, not waited for).</p>' +
+      `<div class="scan__list">${others.map((o) => `
+        <label class="scan__item">
+          <input type="checkbox" class="dep__check" value="${esc(o.id)}" ${current.has(o.id) ? 'checked' : ''}>
+          <span class="scan__info">
+            <span class="scan__name">${esc(o.name)}</span>
+            <span class="scan__path">${esc(o.group || 'Ungrouped')} · ${o.port ? `port ${o.port}` : 'no port'}</span>
+          </span>
+        </label>`).join('')}</div>` +
+      '<span class="field__error"></span>',
+    actions: [
+      { label: 'Cancel', onClick: ({ close }) => close() },
+      {
+        label: 'Save',
+        primary: true,
+        onClick: async ({ backdrop, close, btn }) => {
+          const dependsOn = [...backdrop.querySelectorAll('.dep__check:checked')].map((c) => c.value);
+          busy(btn, 'Saving…');
+          try {
+            const updated = await api.setDeps(id, dependsOn);
+            updateProject(updated, { structural: false });
+            toastSuccess(dependsOn.length > 0
+              ? `${dependsOn.length} dependenc${dependsOn.length === 1 ? 'y' : 'ies'} saved`
+              : 'Dependencies cleared');
+            close();
+          } catch (err) {
+            setError(backdrop, err.message);
+            toastError(err.message);
+            btn.disabled = false;
+            btn.textContent = 'Save';
+          }
+        },
+      },
+    ],
+  });
+}
+
+// ---------- Port In Use ----------
+// Shown when Start fails the pre-flight check, with the actual holder.
+export function openPortConflictDialog(id, err, onRetry) {
+  const p = getProject(id);
+  if (!p) return;
+  const holder = err.holder;
+
+  openModal({
+    title: `Port ${err.port} In Use`,
+    wide: true,
+    bodyHtml:
+      `<p>Cannot start <strong>${esc(p.name)}</strong> — port <strong>${err.port}</strong> is already taken.</p>` +
+      (holder
+        ? field('Held by', `<div class="field__value">${esc(holder.name)} · PID ${holder.pid}</div>`) +
+          (holder.command ? `<p class="modal__hint"><code>${esc(holder.command)}</code></p>` : '')
+        : '<p class="modal__hint">The holding process could not be identified.</p>') +
+      '<span class="field__error"></span>',
+    actions: [
+      { label: 'Cancel', onClick: ({ close }) => close() },
+      {
+        label: 'Change Port',
+        onClick: ({ close }) => {
+          close();
+          openChangePortDialog(id);
+        },
+      },
+      ...(holder
+        ? [{
+            label: `Kill PID ${holder.pid} & Start`,
+            danger: true,
+            onClick: async ({ backdrop, close, btn }) => {
+              busy(btn, 'Killing…');
+              try {
+                await api.killPort(err.port);
+                toastSuccess(`Freed port ${err.port}`);
+                close();
+                onRetry?.();
+              } catch (killErr) {
+                setError(backdrop, killErr.message);
+                toastError(killErr.message);
+                btn.disabled = false;
+                btn.textContent = `Kill PID ${holder.pid} & Start`;
+              }
+            },
+          }]
+        : []),
+    ],
   });
 }
 

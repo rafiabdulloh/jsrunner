@@ -13,7 +13,12 @@ async function req(method, url, body) {
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || `Request failed: ${res.status}`);
+    const err = new Error(data.error || `Request failed: ${res.status}`);
+    err.status = res.status;
+    // Structured failures (e.g. PORT_IN_USE carries the holder) so callers can
+    // offer a fix instead of just showing the message.
+    Object.assign(err, data);
+    throw err;
   }
   return res.status === 204 ? null : res.json();
 }
@@ -26,9 +31,15 @@ const real = {
     return Object.fromEntries(list.map((p) => [p.id, { cpu: p.cpu, mem: p.mem }]));
   },
   addProject: (path, group, pm) => req('POST', '/project', { path, group, pm }),
+  scanWorkspace: (path, depth) => req('POST', '/workspace/scan', { path, depth }),
+  addWorkspaceServices: (services, group) => req('POST', '/workspace/add', { services, group }),
   startProject: (id) => req('POST', '/project/start', { id }),
   stopProject: (id) => req('POST', '/project/stop', { id }),
   restartProject: (id) => req('POST', '/project/restart', { id }),
+  setAutoRestart: (id, enabled) => req('POST', '/project/autorestart', { id, enabled }),
+  setRunConfig: (id, patch) => req('POST', '/project/runconfig', { id, ...patch }),
+  setDeps: (id, dependsOn) => req('POST', '/project/deps', { id, dependsOn }),
+  killPort: (port) => req('POST', '/port/kill', { port }),
   runScript: (id, script) => req('POST', '/project/script', { id, script }),
   install: (id) => req('POST', '/project/script', { id, script: 'install' }),
   rescanProject: (id) => req('POST', '/project/rescan', { id }),
@@ -42,6 +53,12 @@ const real = {
   editGroup: (id, group) => req('POST', '/project/group', { id, group }),
   renameGroup: (oldName, newName) => req('POST', '/group/rename', { oldName, newName }),
   deleteGroup: (name, mode) => req('POST', '/group/delete', { name, mode }),
+  getProfiles: () => req('GET', '/profiles'),
+  createProfile: (name, projectIds, mode) => req('POST', '/profiles', { name, projectIds, mode }),
+  updateProfileById: (id, name, projectIds, mode) => req('PUT', `/profiles/${id}`, { name, projectIds, mode }),
+  deleteProfile: (id) => req('DELETE', `/profiles/${id}`),
+  startProfile: (id) => req('POST', `/profiles/${id}/start`),
+  stopProfile: (id) => req('POST', `/profiles/${id}/stop`),
 };
 
 const call = (fn, ...args) => (USE_MOCK ? mock[fn](...args) : real[fn](...args));
@@ -50,9 +67,15 @@ export const api = {
   getProjects: () => call('getProjects'),
   getMetrics: () => call('getMetrics'),
   addProject: (path, group, pm) => call('addProject', path, group, pm),
+  scanWorkspace: (path, depth) => call('scanWorkspace', path, depth),
+  addWorkspaceServices: (services, group) => call('addWorkspaceServices', services, group),
   startProject: (id) => call('startProject', id),
   stopProject: (id) => call('stopProject', id),
   restartProject: (id) => call('restartProject', id),
+  setAutoRestart: (id, enabled) => call('setAutoRestart', id, enabled),
+  setRunConfig: (id, patch) => call('setRunConfig', id, patch),
+  setDeps: (id, dependsOn) => call('setDeps', id, dependsOn),
+  killPort: (port) => call('killPort', port),
   runScript: (id, script) => call('runScript', id, script),
   install: (id) => call('install', id),
   rescanProject: (id) => call('rescanProject', id),
@@ -65,4 +88,10 @@ export const api = {
   editGroup: (id, group) => call('editGroup', id, group),
   renameGroup: (oldName, newName) => call('renameGroup', oldName, newName),
   deleteGroup: (name, mode) => call('deleteGroup', name, mode),
+  getProfiles: () => call('getProfiles'),
+  createProfile: (name, projectIds, mode) => call('createProfile', name, projectIds, mode),
+  updateProfileById: (id, name, projectIds, mode) => call('updateProfileById', id, name, projectIds, mode),
+  deleteProfile: (id) => call('deleteProfile', id),
+  startProfile: (id) => call('startProfile', id),
+  stopProfile: (id) => call('stopProfile', id),
 };

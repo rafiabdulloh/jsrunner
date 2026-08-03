@@ -11,6 +11,11 @@ import { registerScriptRoutes } from '../api/script.mjs';
 import { registerPortRoutes } from '../api/port.mjs';
 import { registerPathRoutes } from '../api/path.mjs';
 import { registerGroupRoutes } from '../api/group.mjs';
+import { registerWorkspaceRoutes } from '../api/workspace.mjs';
+import { registerEventRoutes } from '../api/events.mjs';
+import { registerProfileRoutes } from '../api/profiles.mjs';
+import * as supervisor from '../utils/supervisor.mjs';
+import { startMetricsCollection } from '../utils/metrics.mjs';
 
 const PORT = parseInt(process.env.PORT, 10) || 3000;
 const WORKDIR = process.env.WORKDIR || process.cwd();
@@ -18,14 +23,19 @@ const WORKDIR = process.env.WORKDIR || process.cwd();
 const router = createRouter();
 const staticHandler = serveStatic(WORKDIR);
 
-registerProjectRoutes(router);
 logger.initLogger(processManager);
+supervisor.initSupervisor({ config, processManager, logger });
+
+registerProjectRoutes(router, supervisor);
 registerLogRoutes(router, config, logger);
-registerControlRoutes(router, config, processManager);
+registerControlRoutes(router, config, processManager, supervisor);
 registerScriptRoutes(router, config, processManager);
 registerPortRoutes(router);
 registerPathRoutes(router);
 registerGroupRoutes(router, config);
+registerWorkspaceRoutes(router);
+registerEventRoutes(router, { supervisor, logger });
+registerProfileRoutes(router, config, supervisor, processManager);
 
 const server = http.createServer(async (req, res) => {
   try {
@@ -43,8 +53,26 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => {
+// Live CPU/memory for running projects (in memory — never written to config)
+startMetricsCollection(processManager, (id, m) => supervisor.setMetrics(id, m));
+// TCP readiness probes: "process spawned" vs "server actually listening"
+supervisor.startHealthChecks();
+
+server.listen(PORT, async () => {
   console.log(`Server listening on http://localhost:${PORT}`);
+
+  // Re-attach to services left running by a previous run of this server
+  try {
+    const { adopted, cleared } = await supervisor.adoptOrphans();
+    for (const p of adopted) {
+      console.log(`Re-attached to "${p.name}" (PID ${p.adoptedPid}, matched by ${p.via})`);
+    }
+    for (const p of cleared) {
+      console.log(`Marked "${p.name}" as stopped — its process is gone`);
+    }
+  } catch (err) {
+    console.error('Orphan adoption failed:', err.message);
+  }
 });
 
 // Kill all child processes on shutdown

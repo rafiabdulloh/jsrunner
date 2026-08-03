@@ -96,7 +96,7 @@ export function renderGroups(container) {
 
   if (!projects.length) {
     container.appendChild(
-      emptyState('No projects yet', 'Add a project by pointing to its package.json to get started.')
+      emptyState('No projects yet', 'Click Add Project and point to a folder or workspace — every service inside is detected automatically.')
     );
     return;
   }

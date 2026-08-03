@@ -1,3 +1,5 @@
+import { removeProjectFromProfiles } from '../utils/profiles.mjs';
+
 function sendJSON(res, status, data) {
   const body = JSON.stringify(data);
   res.writeHead(status, { 'Content-Type': 'application/json' });
@@ -93,6 +95,7 @@ export function registerGroupRoutes(router, config) {
       if (p.group === name) {
         if (mode === 'delete_all') {
           config.deleteProject(p.id);
+          removeProjectFromProfiles(p.id);
         } else {
           config.updateProject(p.id, { group: null });
         }

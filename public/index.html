@@ -18,10 +18,13 @@
         <input id="search" type="search" placeholder="Search by name, folder, port, framework, group…" aria-label="Search projects">
       </div>
       <div class="header__actions">
+        <span id="live-status" class="live" data-state="polling" title="Connecting…" aria-hidden="true"></span>
         <button id="add-project" class="btn btn--primary">Add Project</button>
         <button id="stop-all" class="btn">Stop All</button>
       </div>
     </header>
+
+    <nav id="profiles" class="profiles" aria-label="Profiles" hidden></nav>
 
     <nav id="recent" class="recent" aria-label="Recent projects" hidden>
       <span class="recent__label">Recent</span>
