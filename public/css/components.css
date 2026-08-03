@@ -1042,3 +1042,48 @@
   min-height: 22px;
   font-size: 11px;
 }
+
+/* ---------- Running Services ---------- */
+.card__services {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: 0 var(--sp-3);
+}
+.card__service {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  background: color-mix(in srgb, #22c55e 10%, transparent);
+  border: 1px solid color-mix(in srgb, #22c55e 25%, transparent);
+  border-radius: var(--r-md);
+  font-size: var(--fs-sm);
+}
+.card__service-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 6px #22c55e;
+  animation: svc-pulse 1.5s ease-in-out infinite;
+}
+@keyframes svc-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.card__service-name {
+  font-weight: 600;
+  color: var(--text-0);
+}
+.card__service-pid {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-2);
+}
+.card__service .btn {
+  margin-left: auto;
+  min-height: 24px;
+  padding: 0 var(--sp-2);
+  font-size: 11px;
+}

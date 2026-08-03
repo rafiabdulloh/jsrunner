@@ -11,6 +11,7 @@ let timer = null;
 let cursor = 0;
 let autoScroll = true;
 let currentId = null;
+let currentScript = null;
 let filterText = '';
 let lines = []; // { text, err } for the open project
 
@@ -65,7 +66,7 @@ function build() {
 async function poll() {
   if (!currentId) return;
   try {
-    const { lines: fresh, total } = await api.fetchLogs(currentId, cursor);
+    const { lines: fresh, total } = await api.fetchLogs(currentId, cursor, currentScript);
     if (!currentId) return; // closed while awaiting
     if (total < cursor) {
       // buffer was cleared elsewhere — start over
@@ -141,20 +142,21 @@ function render({ append } = {}) {
   if (autoScroll) body.scrollTop = body.scrollHeight;
 }
 
-export function openLogPanel(id) {
+export function openLogPanel(id, script) {
   if (!panel) build();
   closeLogPanel(); // reset any previous session, keep the DOM node
   const p = getProject(id);
   if (!p) return;
 
   currentId = id;
+  currentScript = script || null;
   cursor = 0;
   lines = [];
   filterText = '';
   autoScroll = true;
   panel.querySelector('.drawer__search').value = '';
   panel.querySelector('[data-lact="pause"]').innerHTML = icons.pause;
-  panel.querySelector('.drawer__title').textContent = `${p.name} — logs`;
+  panel.querySelector('.drawer__title').textContent = script ? `${p.name} — ${script} logs` : `${p.name} — logs`;
   render();
   panel.classList.add('drawer--open');
   const bd = document.querySelector('.drawer-backdrop');
@@ -168,6 +170,7 @@ export function closeLogPanel() {
   if (timer) clearInterval(timer);
   timer = null;
   currentId = null;
+  currentScript = null;
   lines = [];
   if (panel) {
     panel.classList.remove('drawer--open');

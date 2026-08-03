@@ -1,0 +1,36 @@
+{
+  "name": "@shizuyume/jsrunner",
+  "version": "0.1.3",
+  "description": "Run many local JavaScript/TypeScript dev projects from one dashboard — no terminal juggling. Zero dependencies.",
+  "type": "module",
+  "bin": {
+    "jsrunner": "./server/server.mjs",
+    "lsr": "./server/server.mjs",
+    "localsr": "./server/server.mjs"
+  },
+  "files": [
+    "server/",
+    "api/",
+    "utils/",
+    "public/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server/server.mjs",
+    "check": "node --check server/server.mjs && node --check server/router.mjs && node --check server/static.mjs && node --check api/control.mjs",
+    "prepack": "npm run check"
+  },
+  "keywords": [
+    "dev-tools",
+    "dashboard",
+    "localhost",
+    "process-manager",
+    "multi-project",
+    "npm-scripts"
+  ],
+  "license": "MIT",
+  "private": false
+}

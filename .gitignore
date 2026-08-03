@@ -2,7 +2,9 @@ brd.md
 .codegraph
 .omo
 .playwright-mcp
+docs
 logs/
+config/projects.json
 config/projects.json.bak
 config/projects.json.tmp
 config/profiles.json.bak

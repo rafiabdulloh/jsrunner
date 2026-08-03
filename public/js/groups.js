@@ -24,21 +24,24 @@ function groupProjects(projects) {
 const byName = (a, b) => a.name.localeCompare(b.name);
 
 async function bulkAction(list, action, verb) {
-  const targets = list.filter((p) =>
-    verb === 'start' ? p.status !== 'running' && p.status !== 'starting' : p.status !== 'stopped'
-  );
+  const targets = list.filter((p) => {
+    if (verb === 'start') return p.status !== 'running' && p.status !== 'starting';
+    if (verb === 'stop') return (p.runningServices?.length || 0) > 0;
+    return p.status !== 'stopped'; // restart
+  });
   if (!targets.length) return;
-  for (const p of targets) patchProject(p.id, { status: 'starting' }, { structural: false });
+  if (verb !== 'stop') for (const p of targets) patchProject(p.id, { status: 'starting' }, { structural: false });
   const results = await Promise.allSettled(targets.map((p) => action(p.id)));
   results.forEach((r, i) => {
     if (r.status === 'fulfilled' && r.value) {
       updateProject(r.value, { structural: false });
       if (verb !== 'stop') addRecent(targets[i].id);
     } else if (r.status === 'rejected') {
-      patchProject(targets[i].id, { status: 'stopped' }, { structural: false });
+      if (verb !== 'stop') patchProject(targets[i].id, { status: 'stopped' }, { structural: false });
       toastError(`${targets[i].name}: ${r.reason.message}`);
     }
   });
+  if (verb === 'stop') setProjects(await api.getProjects());
 }
 
 export const startGroup = (list) => bulkAction(list, api.startProject, 'start');
@@ -58,17 +61,17 @@ function renderGroup(name, projects, collapsed) {
       <span class="group__chevron">${icons.chevron}</span>
       <span class="group__name">${name}</span>
     </button>
-    <button class="btn btn--sm btn--icon" data-gact="rename" title="Rename group">${icons.edit}</button>
+    ${name !== UNGROUPED ? `<button class="btn btn--sm btn--icon" data-gact="rename" title="Rename group">${icons.edit}</button>` : ''}
     <span class="group__count">${projects.length}</span>
     ${runningCount ? `<span class="group__count group__count--running">${runningCount} running</span>` : ''}
     <div class="group__actions">
       <button class="btn btn--sm btn--icon" data-gact="stop" title="Stop all in ${name}">${icons.stop}</button>
-      <button class="btn btn--sm btn--icon btn--danger" data-gact="delete" title="Delete group">${icons.trash}</button>
+      ${name !== UNGROUPED ? `<button class="btn btn--sm btn--icon btn--danger" data-gact="delete" title="Delete group">${icons.trash}</button>` : ''}
     </div>`;
   header.querySelector('.group__toggle').addEventListener('click', () => toggleCollapsed(name));
   header.querySelector('[data-gact="stop"]').addEventListener('click', () => stopGroup(projects));
-  header.querySelector('[data-gact="rename"]').addEventListener('click', () => openRenameGroupDialog(name));
-  header.querySelector('[data-gact="delete"]').addEventListener('click', () => openDeleteGroupDialog(name));
+  header.querySelector('[data-gact="rename"]')?.addEventListener('click', () => openRenameGroupDialog(name));
+  header.querySelector('[data-gact="delete"]')?.addEventListener('click', () => openDeleteGroupDialog(name));
 
   const body = document.createElement('div');
   body.className = 'group__body';

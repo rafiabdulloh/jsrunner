@@ -6,6 +6,12 @@
 
 > ⚠️ **Catatan:** Tools ini khusus untuk **komputer lokal / development** — bukan deployment manager, bukan Docker manager, dan bukan process manager untuk production.
 
+[![npm version](https://img.shields.io/npm/v/@shizuyume/jsrunner)](https://www.npmjs.com/package/@shizuyume/jsrunner)
+[![npm downloads](https://img.shields.io/npm/dm/@shizuyume/jsrunner)](https://www.npmjs.com/package/@shizuyume/jsrunner)
+[![Node](https://img.shields.io/badge/node-%3E%3D18-339933?logo=node.js&logoColor=white)](https://nodejs.org)
+[![Dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)](package.json)
+[![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
+
 ---
 
 ## ✨ Fitur Unggulan
@@ -50,6 +56,50 @@ Tanpa Express, React, Vue, Electron, SQLite, MongoDB, Socket.io. Ringan dan port
 
 ---
 
+## 🏗️ Arsitektur
+
+**Alur request** — satu server HTTP, router internal memisahkan API dan file statis:
+
+```
+Browser (dashboard)
+     │  HTTP (fetch / polling)
+     ▼
+server/server.mjs ──── router.match() ────────────────┐
+     │                                                │
+     │  /api/*                                        │  bukan /api/*
+     ▼                                                ▼
+api/*.mjs (handler per domain)               serveStatic(PKG_ROOT/public)
+     │                                                │
+     ├── utils/config.mjs ──► config/projects.json    │  index.html
+     ├── utils/process.mjs ──► spawn / kill proses     │  css/
+     ├── utils/logger.mjs ──► buffer log per project   │  js/
+     ├── utils/scanner.mjs ──► deteksi framework/pm    │
+     └── utils/port.mjs ──► rewrite config port        │
+```
+
+**Penyimpanan** — satu file JSON sebagai satu-satunya "database":
+
+```
+UI ──► REST API ──► utils/config.mjs ──► config/projects.json
+     ▲                                        │
+     └────────── auto-save tiap perubahan ◄────┘
+```
+
+**Lifecycle process** — setiap project independen, crash terdeteksi & bisa auto-restart:
+
+```
+stopped ──► starting ──► running ──► crashed
+   ▲           │            │  ▲        │
+   └───────────┴────────────┘  └─ error ─┤
+                                         │ autoRestart=true
+                                         ▼
+                                    (2 detik) ──► running
+```
+
+**Log & metrics** — tanpa websocket, polling ringan: UI tarik log baru via `GET /api/project/:id/logs?after=<id>`.
+
+---
+
 ## 📦 Persyaratan
 
 - **Node.js** (versi yang mendukung ES Module, disarankan v18+)
@@ -58,6 +108,20 @@ Tanpa Express, React, Vue, Electron, SQLite, MongoDB, Socket.io. Ringan dan port
 ---
 
 ## 🚀 Cara Menjalankan
+
+**Opsi 1 — Install global via npm** (paling cepat, auto-update notice):
+
+```bash
+npm install -g @shizuyume/jsrunner
+
+# Jalankan dari folder mana pun — config dibuat di folder tersebut
+jsrunner
+```
+
+> ⬆️ Saat versi baru dirilis, server menampilkan notif update di terminal:
+> `npm install -g @shizuyume/jsrunner@latest`
+
+**Opsi 2 — Clone repository** (untuk development):
 
 ```bash
 # 1. Clone repository
@@ -69,19 +133,19 @@ node server/server.mjs
 
 # 3. Buka dashboard
 # Browser otomatis terbuka di:
-http://localhost:3000
+http://localhost:9999
 ```
 
 ### Konfigurasi Environment
 
 | Variable | Default | Fungsi |
 |---|---|---|
-| `PORT` | `3000` | Port dashboard |
+| `PORT` | `9999` | Port dashboard |
 | `WORKDIR` | direktori sekarang | Lokasi root untuk melayani file statis |
 
 ```bash
 # Contoh: jalankan di port lain
-PORT=8080 node server/server.mjs
+PORT=9876 node server/server.mjs
 ```
 
 ---
@@ -533,4 +597,4 @@ Struktur modular dengan separation of concern. Beberapa prinsip yang dipegang:
 
 ## 📄 Lisensi
 
-Belum ditentukan. Dibuat untuk keperluan internal / personal development.
+MIT License — lihat [LICENSE](LICENSE). Bebas dipakai, dimodifikasi, dan didistribusikan, dengan atribusi.

@@ -2,17 +2,20 @@
 import { api } from './api.js';
 import { icons } from './icons.js';
 import { toastError, toastSuccess, toastInfo } from './toast.js';
-import { getProject, updateProject, patchProject, addProject, addRecent, setScriptRunning, clearScriptRunning, getScriptRunning } from './state.js';
+import { getProject, updateProject, patchProject, addProject, addRecent } from './state.js';
 import { openLogPanel } from './logs.js';
 import {
   openChangePortDialog, openEditPathDialog, openDeleteDialog, openMoveGroupDialog,
-  openRunSettingsDialog, openDependenciesDialog, openPortConflictDialog,
+  openServiceDialog, openRunSettingsDialog, openDependenciesDialog, openPortConflictDialog,
 } from './dialogs.js';
 
 const esc = (s) =>
   String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 const STATUS_LABEL = { running: 'Running', stopped: 'Stopped', crashed: 'Crashed', starting: 'Starting' };
+
+const blocking = new Map(); // projectId -> 'install' | 'build' | undefined
+const clickLock = new Set(); // `${projectId}:${script}` in-flight click keys
 
 // A running process whose port is not answering yet is still starting up as far
 // as the user is concerned — that is what the health probe is for.
@@ -68,8 +71,16 @@ function cardHtml(p) {
   const running = p.status === 'running';
   const busy = p.status === 'starting';
   const fw = p.framework.toLowerCase();
-  const scriptRunning = getScriptRunning(p.id);
-  const blocked = running || busy || !!scriptRunning;
+  const services = p.runningServices || [];
+  const block = blocking.get(p.id);
+  const anyRunning = services.length > 0;
+  const runningParent = services.some((s) => s.script === 'dev' || s.script === 'start');
+  const serviceRunning = anyRunning && !runningParent;
+  const isParentScript = (s) => s === 'dev' || s === 'start';
+  const scriptDisabled = (s) => busy || !!block || runningParent || (serviceRunning && isParentScript(s)) || services.some((x) => x.script === s);
+  const actionDisabled = busy || !!block || anyRunning;
+  const VISIBLE_SCRIPT = (s) => s === 'dev' || s === 'start' || s.startsWith('dev:') || s.startsWith('start:');
+  const visibleScripts = p.scripts.filter(VISIBLE_SCRIPT);
   const shown = displayStatus(p);
   const deps = p.dependsOn?.length || 0;
   const run = runLabel(p);
@@ -80,7 +91,14 @@ function cardHtml(p) {
       <h3 class="card__name" title="${esc(p.name)}">${esc(p.name)}</h3>
       ${p.url ? `<a class="btn btn--sm card__open" href="${esc(p.url)}" target="_blank" rel="noopener" title="Open ${esc(p.url)}">${icons.external} Open</a>` : ''}
     </div>
-    ${scriptRunning ? `<div class="card__script-running"><span class="btn__spinner"></span> Running: ${esc(scriptRunning)} <button data-act="cancel-script" class="btn btn--sm btn--danger">✕ Cancel</button></div>` : ''}
+    ${services.length > 0 ? `<div class="card__services">${services.map(s => `
+      <div class="card__service">
+        <span class="card__service-dot"></span>
+        <span class="card__service-name">${esc(s.script)}</span>
+        <span class="card__service-pid">PID ${s.pid}</span>
+        <button class="btn btn--sm btn--danger" data-act="stop-service" data-script="${esc(s.script)}">${icons.stop} Stop</button>
+        <button class="btn btn--sm" data-act="service-logs" data-script="${esc(s.script)}">${icons.terminal} Log</button>
+      </div>`).join('')}</div>` : ''}
     <div class="card__badges">
       <span class="badge badge--${esc(fw)}">${esc(p.framework)}</span>
       <span class="badge badge--pm">${esc(p.pm)}</span>
@@ -97,18 +115,18 @@ function cardHtml(p) {
     </dl>
     <div class="card__actions">
       ${running
-        ? `<button class="btn btn--sm btn--danger" data-act="stop">${icons.stop} Stop</button>
-           <button class="btn btn--sm" data-act="restart">${icons.restart} Restart</button>`
+        ? `<button class="btn btn--sm btn--danger" data-act="stop">${icons.stop} Stop All</button>`
         : busy
           ? `<button class="btn btn--sm" disabled><span class="btn__spinner"></span> Starting…</button>`
           : `<button class="btn btn--sm" data-act="restart" ${p.status === 'crashed' ? '' : 'disabled'}>${icons.restart} Restart</button>`}
-      <button class="btn btn--sm" data-act="install">${icons.install} Install</button>
-      <button class="btn btn--sm" data-act="build">${icons.build} Build</button>
+      <button class="btn btn--sm" data-act="install" ${actionDisabled ? 'disabled' : ''}>${icons.install} Install</button>
+      <button class="btn btn--sm" data-act="build" ${actionDisabled ? 'disabled' : ''}>${icons.build} Build</button>
     </div>
+    ${visibleScripts.length ? `
     <div class="card__scripts">
       <span class="card__scripts-label">Scripts</span>
-      ${p.scripts.map((s) => `<button class="btn btn--sm" data-script="${esc(s)}" ${blocked ? 'disabled' : ''}>${esc(s)}</button>`).join('')}
-    </div>
+      ${visibleScripts.map((s) => `<button class="btn btn--sm" data-script="${esc(s)}" ${scriptDisabled(s) ? 'disabled' : ''}>${esc(s)}</button>`).join('')}
+    </div>` : ''}
     <div class="card__footer">
       <button class="btn btn--sm btn--icon" data-act="group" title="Move to group">${icons.folder}</button>
       <span class="spacer"></span>
@@ -161,25 +179,6 @@ async function run(id, action, { optimistic, success, recent = false } = {}) {
   }
 }
 
-// Start a service, turning a port conflict into something the user can act on
-// instead of a dead-end error toast.
-function startService(id, script) {
-  setScriptRunning(id, script);
-  api.startProject(id)
-    .then((updated) => {
-      clearScriptRunning(id);
-      if (updated) updateProject(updated, { structural: false });
-    })
-    .catch((err) => {
-      clearScriptRunning(id);
-      if (err.code === 'PORT_IN_USE') {
-        openPortConflictDialog(id, err, () => startService(id, script));
-        return;
-      }
-      toastError(err.message);
-    });
-}
-
 function withSpinner(btn, fn) {
   const original = btn.innerHTML;
   btn.disabled = true;
@@ -197,25 +196,44 @@ function wire(el, p) {
     const act = btn.dataset.act;
     const script = btn.dataset.script;
 
-    if (script) {
-      // dev/start saat stopped/crashed → start service (show running badge)
-      if ((p.status === 'stopped' || p.status === 'crashed') && (script === 'dev' || script === 'start')) {
-        startService(p.id, script);
+    if (script && !act) {
+      const lockKey = `${p.id}:${script}`;
+      if (clickLock.has(lockKey)) return;
+      clickLock.add(lockKey);
+      setTimeout(() => clickLock.delete(lockKey), 400);
+      // Scripts section only contains dev/start/dev:*/start:* (filtered in cardHtml)
+      const isParent = script === 'dev' || script === 'start';
+      if (isParent && (p.status === 'stopped' || p.status === 'crashed')) {
+        // Parent dev/start → start directly, no modal
+        patchProject(p.id, { status: 'starting' }, { structural: false });
+        api.startProject(p.id, script)
+          .then((updated) => { if (updated) updateProject(updated, { structural: false }); })
+          .catch((err) => {
+            if (err.code === 'PORT_IN_USE') {
+              openPortConflictDialog(p.id, err, () => {
+                api.startProject(p.id, script)
+                  .then((u) => { if (u) updateProject(u, { structural: false }); })
+                  .catch((e2) => toastError(e2.message));
+              });
+              return;
+            }
+            toastError(err.message);
+          });
         return;
       }
-      // Script lain → one-shot dengan running indicator
-      setScriptRunning(p.id, script);
-      withSpinner(btn, () =>
-        api.runScript(p.id, script)
-          .then(() => { clearScriptRunning(p.id); toastSuccess(`Script "${script}" finished`); })
-          .catch((err) => { clearScriptRunning(p.id); toastError(err.message); })
-      );
+      openServiceDialog(p.id, script);
       return;
     }
 
     switch (act) {
       case 'stop':
         run(p.id, () => api.stopProject(p.id));
+        break;
+      case 'stop-service':
+        run(p.id, () => api.stopProject(p.id, btn.dataset.script));
+        break;
+      case 'service-logs':
+        openLogPanel(p.id, btn.dataset.script);
         break;
       case 'restart':
         run(p.id, () => api.restartProject(p.id), {
@@ -224,33 +242,25 @@ function wire(el, p) {
         });
         break;
       case 'install':
+        blocking.set(p.id, 'install');
+        patchCard(p);
         withSpinner(btn, () =>
           api.install(p.id)
             .then(() => toastSuccess('Dependencies installed'))
             .catch((err) => toastError(err.message))
+            .finally(() => { blocking.delete(p.id); patchCard(p); })
         );
         break;
       case 'build':
+        blocking.set(p.id, 'build');
+        patchCard(p);
         withSpinner(btn, () =>
           api.runScript(p.id, 'build')
             .then(() => toastSuccess('Build finished'))
             .catch((err) => toastError(err.message))
+            .finally(() => { blocking.delete(p.id); patchCard(p); })
         );
         break;
-      case 'cancel-script': {
-        if (p.status === 'running' || p.status === 'starting') {
-          // StartProject — cancel via stopProject
-          api.stopProject(p.id)
-            .then((updated) => { clearScriptRunning(p.id); if (updated) updateProject(updated, { structural: false }); toastInfo('Service stopped'); })
-            .catch((err) => toastError(err.message));
-        } else {
-          // runScript — cancel via cancelScript
-          api.cancelScript(p.id)
-            .then(() => { clearScriptRunning(p.id); toastInfo('Script cancelled'); })
-            .catch((err) => toastError(err.message));
-        }
-        break;
-      }
       case 'rescan':
         withSpinner(btn, () =>
           run(p.id, () => api.rescanProject(p.id), { success: 'Project rescanned' })
@@ -280,8 +290,6 @@ function wire(el, p) {
         openChangePortDialog(p.id, btn.dataset.target);
         break;
       case 'promote-sub': {
-        // Sub-projects are display-only; adding one as a real project is what
-        // gives it Start/Stop, logs, metrics and auto-restart of its own.
         const { path, name } = btn.dataset;
         withSpinner(btn, () =>
           api.addProject(path, p.group || undefined)

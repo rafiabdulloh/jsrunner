@@ -1,8 +1,3 @@
-// REST client. USE_MOCK=true resolves everything from mock.js with fake
-// latency; flip to false when the real backend lands (see brd.md contract).
-import { mock } from './mock.js';
-
-const USE_MOCK = false;
 const BASE = '/api';
 
 async function req(method, url, body) {
@@ -33,8 +28,8 @@ const real = {
   addProject: (path, group, pm) => req('POST', '/project', { path, group, pm }),
   scanWorkspace: (path, depth) => req('POST', '/workspace/scan', { path, depth }),
   addWorkspaceServices: (services, group) => req('POST', '/workspace/add', { services, group }),
-  startProject: (id) => req('POST', '/project/start', { id }),
-  stopProject: (id) => req('POST', '/project/stop', { id }),
+  startProject: (id, script) => req('POST', '/project/start', { id, script }),
+  stopProject: (id, script) => req('POST', '/project/stop', { id, script }),
   restartProject: (id) => req('POST', '/project/restart', { id }),
   setAutoRestart: (id, enabled) => req('POST', '/project/autorestart', { id, enabled }),
   setRunConfig: (id, patch) => req('POST', '/project/runconfig', { id, ...patch }),
@@ -47,7 +42,7 @@ const real = {
   changePort: (id, port, target) => req('POST', '/project/port', { id, port, target }),
   editPath: (id, path) => req('POST', '/project/path', { id, path }),
   deleteProject: (id) => req('DELETE', `/project/${id}`),
-  fetchLogs: (id, after = 0) => req('GET', `/project/${id}/logs?after=${after}`),
+  fetchLogs: (id, after = 0, script) => req('GET', `/project/${id}/logs?after=${after}${script ? `&script=${encodeURIComponent(script)}` : ''}`),
   clearLogs: (id) => req('POST', `/project/${id}/logs/clear`),
   cancelScript: (id) => req('POST', '/project/script/cancel', { id }),
   editGroup: (id, group) => req('POST', '/project/group', { id, group }),
@@ -61,7 +56,7 @@ const real = {
   stopProfile: (id) => req('POST', `/profiles/${id}/stop`),
 };
 
-const call = (fn, ...args) => (USE_MOCK ? mock[fn](...args) : real[fn](...args));
+const call = (fn, ...args) => (real[fn](...args));
 
 export const api = {
   getProjects: () => call('getProjects'),
@@ -69,8 +64,8 @@ export const api = {
   addProject: (path, group, pm) => call('addProject', path, group, pm),
   scanWorkspace: (path, depth) => call('scanWorkspace', path, depth),
   addWorkspaceServices: (services, group) => call('addWorkspaceServices', services, group),
-  startProject: (id) => call('startProject', id),
-  stopProject: (id) => call('stopProject', id),
+  startProject: (id, script) => call('startProject', id, script),
+  stopProject: (id, script) => call('stopProject', id, script),
   restartProject: (id) => call('restartProject', id),
   setAutoRestart: (id, enabled) => call('setAutoRestart', id, enabled),
   setRunConfig: (id, patch) => call('setRunConfig', id, patch),
@@ -82,7 +77,7 @@ export const api = {
   changePort: (id, port, target) => call('changePort', id, port, target),
   editPath: (id, path) => call('editPath', id, path),
   deleteProject: (id) => call('deleteProject', id),
-  fetchLogs: (id, after) => call('fetchLogs', id, after),
+  fetchLogs: (id, after, script) => call('fetchLogs', id, after, script),
   clearLogs: (id) => call('clearLogs', id),
   cancelScript: (id) => call('cancelScript', id),
   editGroup: (id, group) => call('editGroup', id, group),

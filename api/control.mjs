@@ -1,5 +1,6 @@
 import { isPortFree } from '../utils/health.mjs';
 import { findListeningPids, listProcesses } from '../utils/win-process.mjs';
+import fs from 'fs';
 
 function sendJSON(res, status, data) {
   const body = JSON.stringify(data);
@@ -52,7 +53,36 @@ async function findPortHolder(port) {
   return pid ? describePid(pid) : null;
 }
 
+/**
+ * Resolve which port a start action will bind.
+ * Priority: sub-project match (dev:frontend -> subProjects.frontend.port)
+ *           > PORT=NNN in the script value (re-read package.json)
+ *           > project.port
+ */
+function resolveScriptPort(project, script) {
+  if (script && project.subProjects?.length > 0) {
+    const suffix = script.split(':').pop();
+    const sp = project.subProjects.find((s) => s.name === suffix);
+    if (sp?.port) return sp.port;
+  }
+  if (script && project.scripts?.includes(script)) {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(project.path, 'utf-8'));
+      const value = pkg.scripts?.[script] || '';
+      const m = value.match(/\bPORT=(\d+)/);
+      if (m) return parseInt(m[1], 10);
+    } catch { /* fall through */ }
+  }
+  return project.port || null;
+}
+
 export function registerControlRoutes(router, config, processManager, supervisor) {
+  function withRunningServices(project) {
+    const services = processManager.getRunningServices(project.id);
+    const status = services.length > 0 ? 'running' : (project.status || 'stopped');
+    return { ...project, status, runningServices: services };
+  }
+
   // POST /api/project/start
   router.post('/api/project/start', async (req, res) => {
     let body;
@@ -63,31 +93,37 @@ export function registerControlRoutes(router, config, processManager, supervisor
       return;
     }
 
-    const { id } = body;
+    const { id, script } = body;
     const project = config.getProject(id);
     if (!project) {
       sendJSON(res, 404, { error: 'Project not found' });
       return;
     }
 
-    // Idempotent: already running or starting
-    if (project.status === 'running' || project.status === 'starting') {
-      sendJSON(res, 200, project);
+    // Idempotent: requested script already running
+    const running = processManager.getRunningServices(id);
+    if (script && running.some((s) => s.script === script)) {
+      sendJSON(res, 200, withRunningServices(project));
+      return;
+    }
+    if (!script && running.length > 0) {
+      sendJSON(res, 200, withRunningServices(project));
       return;
     }
 
-    // Port conflict pre-flight — report who holds it so the UI can offer a fix
-    if (project.port) {
-      const holderPid = await findPortPid(project.port);
-      const free = holderPid === null && (await isPortFree(project.port));
+    // Resolve the port this start will use, then check for conflicts.
+    const portToUse = resolveScriptPort(project, script);
+    if (portToUse) {
+      const holderPid = await findPortPid(portToUse);
+      const free = holderPid === null && (await isPortFree(portToUse));
       if (!free) {
         const holder = holderPid ? await describePid(holderPid) : null;
         sendJSON(res, 409, {
           error: holder
-            ? `Port ${project.port} is already in use by ${holder.name} (PID ${holder.pid})`
-            : `Port ${project.port} is already in use`,
+            ? `Port ${portToUse} is already in use by ${holder.name} (PID ${holder.pid})`
+            : `Port ${portToUse} is already in use`,
           code: 'PORT_IN_USE',
-          port: project.port,
+          port: portToUse,
           holder,
         });
         return;
@@ -99,7 +135,7 @@ export function registerControlRoutes(router, config, processManager, supervisor
 
     // With dependencies, starting is a background job: deps must come up and
     // answer on their ports first, which can take a while.
-    if (project.dependsOn?.length > 0) {
+    if (project.dependsOn?.length > 0 && !script) {
       const updated = config.updateProject(id, { status: 'starting' });
       supervisor.startWithDependencies(id).catch(() => {
         config.updateProject(id, { status: 'crashed', pid: null, startedAt: null });
@@ -109,17 +145,16 @@ export function registerControlRoutes(router, config, processManager, supervisor
     }
 
     try {
-      // Optimistic: mark as starting so concurrent requests see it
-      config.updateProject(id, { status: 'starting' });
-      const result = processManager.startProjectProcess(project);
-      const updated = config.updateProject(id, {
+      // Explicit script starts one service; empty script starts the default (dev > start > first)
+      const result = script
+        ? processManager.startServiceProcess(project, script)
+        : processManager.startProjectProcess(project);
+      config.updateProject(id, {
         status: result.status || 'running',
         pid: result.pid || null,
         startedAt: result.startedAt || null,
-        cpu: 0,
-        mem: 0,
       });
-      sendJSON(res, 200, updated);
+      sendJSON(res, 200, withRunningServices(config.getProject(id)));
     } catch (err) {
       config.updateProject(id, { status: 'stopped', pid: null, startedAt: null });
       sendJSON(res, 500, { error: err.message || 'Failed to start process' });
@@ -136,7 +171,7 @@ export function registerControlRoutes(router, config, processManager, supervisor
       return;
     }
 
-    const { id } = body;
+    const { id, script } = body;
     const project = config.getProject(id);
     if (!project) {
       sendJSON(res, 404, { error: 'Project not found' });
@@ -147,22 +182,18 @@ export function registerControlRoutes(router, config, processManager, supervisor
     // project is already down (crashed + restart pending).
     supervisor.cancelPendingRestart(id);
 
-    // Idempotent: already stopped or crashed
-    if (project.status === 'stopped' || project.status === 'crashed') {
-      sendJSON(res, 200, project);
-      return;
+    if (script) {
+      processManager.stopServiceProcess(id, script);
+    } else {
+      processManager.stopAllServicesForProject(id);
+      supervisor.clearMetrics(id);
+      config.updateProject(id, {
+        status: 'stopped',
+        pid: null,
+        startedAt: null,
+      });
     }
-
-    processManager.stopProjectProcess(id);
-    supervisor.clearMetrics(id);
-    const updated = config.updateProject(id, {
-      status: 'stopped',
-      pid: null,
-      startedAt: null,
-      cpu: 0,
-      mem: 0,
-    });
-    sendJSON(res, 200, updated);
+    sendJSON(res, 200, withRunningServices(config.getProject(id)));
   });
 
   // POST /api/project/restart
@@ -189,10 +220,8 @@ export function registerControlRoutes(router, config, processManager, supervisor
         pid: result.pid,
         startedAt: result.startedAt,
         status: 'running',
-        cpu: 0,
-        mem: 0,
       });
-      sendJSON(res, 200, updated);
+      sendJSON(res, 200, withRunningServices(updated));
     } catch {
       sendJSON(res, 500, { error: 'Failed to start process' });
     }

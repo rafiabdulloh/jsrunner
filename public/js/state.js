@@ -6,7 +6,6 @@ const state = {
   collapsed: {}, // groupName -> bool
   query: '',
   logProjectId: null,
-  scriptRunning: {}, // { [projectId]: scriptName | null }
 };
 
 const listeners = new Map(); // topic -> Set<fn>
@@ -96,22 +95,6 @@ export function addRecent(id) {
 export function removeRecent(id) {
   state.recent = state.recent.filter((r) => r !== id);
   emit('recent');
-}
-
-export function setScriptRunning(id, script) {
-  state.scriptRunning[id] = script || null;
-  const p = getProject(id);
-  if (p) emit('project', p);
-}
-
-export function clearScriptRunning(id) {
-  delete state.scriptRunning[id];
-  const p = getProject(id);
-  if (p) emit('project', p);
-}
-
-export function getScriptRunning(id) {
-  return state.scriptRunning[id] || null;
 }
 
 export function setLogProject(id) {

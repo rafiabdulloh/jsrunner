@@ -21,8 +21,8 @@ function normalize(text, err) {
 }
 
 export function initLogger(processManager) {
-  processManager.setLogCallback((id, text, err) => {
-    pushLog(id, text, err);
+  processManager.setLogCallback((id, text, err, script) => {
+    pushLog(id, text, err, script);
   });
 }
 
@@ -76,7 +76,7 @@ function appendToDisk(id, entry) {
 function hydrateFromDisk(id) {
   if (hydrated.has(id)) return;
   hydrated.add(id);
-  if (buffers.has(id)) return;
+  if (buffers.has(`${id}:`)) return;
 
   try {
     const file = logFile(id);
@@ -99,20 +99,21 @@ function hydrateFromDisk(id) {
     if (entries.length === 0) return;
 
     entries.push({ text: '——— end of saved log (previous run) ———', err: false, ts: null, history: true });
-    buffers.set(id, entries.slice(-MAX_LINES));
+    buffers.set(`${id}:`, entries.slice(-MAX_LINES));
   } catch {
     // no history for this project
   }
 }
 
-export function pushLog(id, text, err) {
+export function pushLog(id, text, err, script) {
   const entry = normalize(text, err);
-  let buf = buffers.get(id);
+  const key = `${id}:${script || ''}`;
+  let buf = buffers.get(key);
   if (!buf) {
     // Live output exists now, so disk history must not be pulled in later
     hydrateFromDisk(id);
-    buf = buffers.get(id) || [];
-    buffers.set(id, buf);
+    buf = buffers.get(key) || [];
+    buffers.set(key, buf);
   }
   buf.push(entry);
   if (buf.length > MAX_LINES) {
@@ -126,25 +127,58 @@ export function pushLog(id, text, err) {
   }
 }
 
-export function getLogs(id, after = 0) {
-  hydrateFromDisk(id);
-  const buf = buffers.get(id);
-  if (!buf) return { total: 0, lines: [] };
-  return { total: buf.length, lines: buf.slice(after) };
+function mergedLines(keys) {
+  const lines = [];
+  for (const k of keys) {
+    const buf = buffers.get(k);
+    if (buf) lines.push(...buf);
+  }
+  lines.sort((a, b) => a.ts - b.ts);
+  return lines;
 }
 
-export function clearLogs(id) {
-  buffers.delete(id);
-  hydrated.add(id); // cleared on purpose — do not pull the file back in
+export function getLogs(id, after = 0, script) {
+  if (script) {
+    // Per-script buffer, falling back to the general key when the process
+    // layer doesn't tag logs with a script (logCallback sends (id, text, err)).
+    const buf = buffers.get(`${id}:${script}`) || buffers.get(`${id}:`);
+    if (!buf) return { total: 0, lines: [] };
+    return { total: buf.length, lines: buf.slice(after) };
+  }
+  hydrateFromDisk(id);
+  const prefix = `${id}:`;
+  const keys = [...buffers.keys()].filter((k) => k.startsWith(prefix)).sort();
+  const lines = mergedLines(keys);
+  return { total: lines.length, lines: lines.slice(after) };
+}
+
+function deletePrefix(prefix) {
+  for (const k of [...buffers.keys()]) {
+    if (k.startsWith(prefix)) buffers.delete(k);
+  }
+}
+
+export function clearLogs(id, script) {
+  if (script) {
+    buffers.delete(`${id}:${script}`);
+  } else {
+    deletePrefix(`${id}:`);
+    hydrated.add(id); // cleared on purpose — do not pull the file back in
+    try {
+      fs.rmSync(logFile(id), { force: true });
+    } catch {
+      // best effort
+    }
+  }
+}
+
+export function removeLogs(id) {
+  deletePrefix(`${id}:`);
   try {
     fs.rmSync(logFile(id), { force: true });
   } catch {
     // best effort
   }
-}
-
-export function removeLogs(id) {
-  clearLogs(id);
   try {
     fs.rmSync(`${logFile(id)}.1`, { force: true });
   } catch {
