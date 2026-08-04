@@ -46,7 +46,7 @@ export function renderCard(p) {
 function cardHtml(p) {
   const running = p.status === 'running';
   const busy = p.status === 'starting';
-  const fw = p.framework.toLowerCase();
+  const fw = (p.framework || 'unknown').toLowerCase();
   const services = p.runningServices || [];
   const block = blocking.get(p.id);
   const anyRunning = services.length > 0;
@@ -56,7 +56,7 @@ function cardHtml(p) {
   const scriptDisabled = (s) => busy || !!block || runningParent || (serviceRunning && isParentScript(s)) || services.some((x) => x.script === s);
   const actionDisabled = busy || !!block || anyRunning;
   const VISIBLE_SCRIPT = (s) => s === 'dev' || s === 'start' || s.startsWith('dev:') || s.startsWith('start:');
-  const visibleScripts = p.scripts.filter(VISIBLE_SCRIPT);
+  const visibleScripts = (p.scripts || []).filter(VISIBLE_SCRIPT);
   return `
     <div class="card__head">
       <span class="pill pill--${p.status}">${STATUS_LABEL[p.status]}</span>
@@ -68,11 +68,11 @@ function cardHtml(p) {
         <span class="card__service-name">${esc(s.script)}</span>
         <span class="card__service-pid">PID ${s.pid}</span>
         <button class="btn btn--sm btn--danger" data-act="stop-service" data-script="${esc(s.script)}">${icons.stop} Stop</button>
-        <button class="btn btn--sm" data-act="service-logs" data-script="${esc(s.script)}">${icons.terminal} Log</button>
+        <button class="btn btn--sm" data-act="service-logs" data-script="${esc(s.script)}">${icons.scroll} Log</button>
       </div>`).join('')}</div>` : ''}
     <div class="card__badges">
-      <span class="badge badge--${esc(fw)}">${esc(p.framework)}</span>
-      <span class="badge badge--pm">${esc(p.pm)}</span>
+      <span class="badge badge--${esc(fw)}">${esc(p.framework || 'Unknown')}</span>
+      <span class="badge badge--pm">${esc(p.pm || 'n/a')}</span>
     </div>
     <dl class="card__meta">
       ${metaRow('Folder', p.folder, null, null, p.folder)}
@@ -96,8 +96,10 @@ function cardHtml(p) {
     </div>` : ''}
     <div class="card__footer">
       <button class="btn btn--sm btn--icon" data-act="group" title="Move to group">${icons.folder}</button>
+      <button class="btn btn--sm btn--icon" data-act="terminal" title="Open terminal in project folder">${icons.terminal}</button>
+      <button class="btn btn--sm btn--icon" data-act="browser" title="Open in browser" ${!p.port ? 'disabled' : ''}>${icons.globe}</button>
       <span class="spacer"></span>
-      <button class="btn btn--sm btn--icon" data-act="logs" title="View logs">${icons.terminal}</button>
+      <button class="btn btn--sm btn--icon" data-act="logs" title="View logs">${icons.scroll}</button>
       <button class="btn btn--sm btn--icon" data-act="port" title="Change port">${icons.port}</button>
       <button class="btn btn--sm btn--icon" data-act="rescan" title="Rescan package.json">${icons.refresh}</button>
       <button class="btn btn--sm btn--icon" data-act="edit" title="Edit path">${icons.edit}</button>
@@ -214,6 +216,12 @@ function wire(el, p) {
         withSpinner(btn, () =>
           run(p.id, () => api.rescanProject(p.id), { success: 'Project rescanned' })
         );
+        break;
+      case 'terminal':
+        api.openTerminal(p.id).catch((err) => toastError(err.message));
+        break;
+      case 'browser':
+        api.openBrowser(p.id).catch((err) => toastError(err.message));
         break;
       case 'logs':
         openLogPanel(p.id);

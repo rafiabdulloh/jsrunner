@@ -82,7 +82,7 @@
   flex-direction: column;
   gap: var(--sp-3);
   padding: var(--sp-4);
-  background: #14141f;
+  background: var(--bg-1);
   border: 1.5px solid var(--border);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-1);
@@ -666,4 +666,30 @@
   min-height: 24px;
   padding: 0 var(--sp-2);
   font-size: 11px;
+}
+
+/* Theme transition — temporary class on <html> during toggle only.
+   Animates every color change app-wide (all components: body, buttons,
+   cards, modals, borders, shadows), then removed so each element's own
+   hover/focus micro-transitions resume their own timing. */
+html.theme-transition,
+html.theme-transition *,
+html.theme-transition *::before,
+html.theme-transition *::after {
+  transition:
+    background-color var(--t-med),
+    border-color var(--t-med),
+    color var(--t-med),
+    box-shadow var(--t-med),
+    fill var(--t-med),
+    stroke var(--t-med) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.theme-transition,
+  html.theme-transition *,
+  html.theme-transition *::before,
+  html.theme-transition *::after {
+    transition: none !important;
+  }
 }

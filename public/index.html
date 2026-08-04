@@ -4,6 +4,18 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Local Service Runner</title>
+  <script>
+    // FOUC fix: resolve theme before first paint (mirrors theme.js initTheme).
+    (function () {
+      try {
+        var t = localStorage.getItem('jsrunner-theme') ||
+          (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+        document.documentElement.dataset.theme = t;
+      } catch (e) {
+        document.documentElement.dataset.theme = 'dark';
+      }
+    })();
+  </script>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236366f1' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2' y='3' width='20' height='18' rx='2'/%3E%3Cpath d='m7 8 4 4-4 4'/%3E%3Cline x1='13' x2='17' y1='16' y2='16'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="./css/variables.css">
   <link rel="stylesheet" href="./css/main.css">
@@ -18,6 +30,7 @@
         <input id="search" type="search" placeholder="Search by name, folder, port, framework, group…" aria-label="Search projects">
       </div>
       <div class="header__actions">
+        <button id="theme-toggle" class="btn btn--icon" title="Toggle dark/light mode" aria-label="Toggle dark/light mode"></button>
         <button id="add-project" class="btn btn--primary">Add Project</button>
         <button id="stop-all" class="btn">Stop All</button>
       </div>

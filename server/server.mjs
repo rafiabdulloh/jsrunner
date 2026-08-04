@@ -14,6 +14,7 @@ import { registerScriptRoutes } from '../api/script.mjs';
 import { registerPortRoutes } from '../api/port.mjs';
 import { registerPathRoutes } from '../api/path.mjs';
 import { registerGroupRoutes } from '../api/group.mjs';
+import { registerShellRoutes } from '../api/shell.mjs';
 
 // ---------------------------------------------------------------------------
 // CLI argument parsing (falls back to env, then defaults)
@@ -134,6 +135,7 @@ registerScriptRoutes(router, config, processManager);
 registerPortRoutes(router);
 registerPathRoutes(router);
 registerGroupRoutes(router, config);
+registerShellRoutes(router, config);
 
 const server = http.createServer(async (req, res) => {
   try {
