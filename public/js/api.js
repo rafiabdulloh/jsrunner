@@ -37,6 +37,8 @@ const real = {
   editGroup: (id, group) => req('POST', '/project/group', { id, group }),
   renameGroup: (oldName, newName) => req('POST', '/group/rename', { oldName, newName }),
   deleteGroup: (name, mode) => req('POST', '/group/delete', { name, mode }),
+  openTerminal: (id) => req('POST', '/project/' + id + '/terminal'),
+  openBrowser: (id) => req('POST', '/project/' + id + '/open'),
 };
 
 const call = (fn, ...args) => (real[fn](...args));
@@ -60,4 +62,6 @@ export const api = {
   editGroup: (id, group) => call('editGroup', id, group),
   renameGroup: (oldName, newName) => call('renameGroup', oldName, newName),
   deleteGroup: (name, mode) => call('deleteGroup', name, mode),
+  openTerminal: (id) => call('openTerminal', id),
+  openBrowser: (id) => call('openBrowser', id),
 };

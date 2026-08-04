@@ -37,9 +37,8 @@ svg {
   display: block;
 }
 
-html {
-  color-scheme: dark;
-}
+html[data-theme="light"] { color-scheme: light; }
+html:not([data-theme="light"]) { color-scheme: dark; }
 
 body {
   background: var(--bg-0);
@@ -76,7 +75,7 @@ body {
   gap: var(--sp-3);
   min-height: var(--header-h);
   padding: var(--sp-2) var(--sp-4);
-  background: rgba(13, 17, 23, 0.9);
+  background: color-mix(in srgb, var(--bg-0) 90%, transparent);
   backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--border);
   flex-wrap: wrap;

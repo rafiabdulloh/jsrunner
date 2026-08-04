@@ -77,3 +77,16 @@
   --header-h: 56px;
   --drawer-w: 50vw;
 }
+
+/* Light theme — toggle via html[data-theme="light"] */
+html[data-theme="light"] {
+  --bg-0: #f6f8fa;
+  --bg-1: #ffffff;
+  --bg-2: #f0f3f6;
+  --bg-3: #e9edf1;
+  --border: #d0d7de;
+  --border-strong: #afb8c1;
+  --text-0: #1f2328;
+  --text-1: #59636e;
+  --text-2: #818b98;
+}

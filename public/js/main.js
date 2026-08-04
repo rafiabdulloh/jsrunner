@@ -1,6 +1,7 @@
 // Bootstrap: initial load, header actions, polling loops, event wiring.
 import { api } from './api.js';
 import { icons, logoIcon } from './icons.js';
+import { initTheme, toggleTheme, currentTheme } from './theme.js';
 import { on, getState, setProjects, updateProject } from './state.js';
 import { renderGroups, startGroup, stopGroup, restartGroup } from './groups.js';
 import { patchCard, startUptimeTicker } from './cards.js';
@@ -34,7 +35,13 @@ on('status', ({ project, prev }) => {
 function wireHeader() {
   document.querySelector('#add-project').addEventListener('click', openAddProjectDialog);
   document.querySelector('#stop-all').addEventListener('click', () => stopGroup(getState().projects));
+  document.querySelector('#theme-toggle').addEventListener('click', () => { toggleTheme(); renderThemeIcon(); });
   initSearch(document.querySelector('#search'));
+}
+
+function renderThemeIcon() {
+  document.querySelector('#theme-toggle').innerHTML =
+    currentTheme() === 'dark' ? icons.sun : icons.moon;
 }
 
 async function pollStatuses() {
@@ -55,6 +62,8 @@ async function pollStatuses() {
 }
 
 async function boot() {
+  initTheme();
+  renderThemeIcon();
   wireHeader();
   startUptimeTicker(() => getState().projects);
   try {
