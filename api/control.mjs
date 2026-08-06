@@ -206,7 +206,7 @@ export function registerControlRoutes(router, config, processManager, supervisor
       return;
     }
 
-    const { id } = body;
+    const { id, script } = body;
     const project = config.getProject(id);
     if (!project) {
       sendJSON(res, 404, { error: 'Project not found' });
@@ -215,7 +215,11 @@ export function registerControlRoutes(router, config, processManager, supervisor
 
     try {
       supervisor.cancelPendingRestart(id);
-      const result = processManager.restartProjectProcess(project);
+      // With a script, only that one service is cycled; the project's other
+      // running services are left alone.
+      const result = script
+        ? processManager.restartServiceProcess(project, script)
+        : processManager.restartProjectProcess(project);
       const updated = config.updateProject(id, {
         pid: result.pid,
         startedAt: result.startedAt,

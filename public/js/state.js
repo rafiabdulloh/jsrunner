@@ -6,7 +6,16 @@ const state = {
   collapsed: {}, // groupName -> bool
   query: '',
   logProjectId: null,
+  view: readView(), // 'list' | 'kanban' — card grid vs status columns
 };
+
+function readView() {
+  try {
+    return localStorage.getItem('lsr.view') === 'kanban' ? 'kanban' : 'list';
+  } catch {
+    return 'list';
+  }
+}
 
 const listeners = new Map(); // topic -> Set<fn>
 
@@ -84,6 +93,16 @@ export function setQuery(q) {
 
 export function toggleCollapsed(group) {
   state.collapsed[group] = !state.collapsed[group];
+  emit('projects');
+}
+
+export function toggleView() {
+  state.view = state.view === 'list' ? 'kanban' : 'list';
+  try {
+    localStorage.setItem('lsr.view', state.view);
+  } catch {
+    /* private mode — the choice still holds for this session */
+  }
   emit('projects');
 }
 

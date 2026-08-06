@@ -5,20 +5,36 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Local Service Runner</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236366f1' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2' y='3' width='20' height='18' rx='2'/%3E%3Cpath d='m7 8 4 4-4 4'/%3E%3Cline x1='13' x2='17' y1='16' y2='16'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="./css/variables.css">
   <link rel="stylesheet" href="./css/main.css">
   <link rel="stylesheet" href="./css/components.css">
+  <script>
+    // Applied before first paint so a light-theme user never sees a dark flash.
+    try {
+      document.documentElement.dataset.theme =
+        localStorage.getItem('lsr.theme') === 'light' ? 'light' : 'dark';
+    } catch { document.documentElement.dataset.theme = 'dark'; }
+  </script>
 </head>
 <body>
   <div class="app">
     <header class="header">
-      <span class="header__title"><span id="logo"></span>Local Service Runner</span>
+      <span class="header__title"><span id="logo" class="header__logo"></span>Local Service Runner</span>
       <div class="header__search">
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
         <input id="search" type="search" placeholder="Search by name, folder, port, framework, group…" aria-label="Search projects">
       </div>
       <div class="header__actions">
-        <span id="live-status" class="live" data-state="polling" title="Connecting…" aria-hidden="true"></span>
+        <span class="header__running">
+          <span id="live-status" class="live" data-state="polling" title="Connecting…"></span>
+          <span id="running-count" role="status">0/0 running</span>
+        </span>
+        <button id="theme-toggle" class="switch-theme" title="Toggle theme" aria-label="Toggle light or dark theme" aria-pressed="false">
+          <span class="switch-theme__thumb"></span>
+        </button>
         <button id="add-project" class="btn btn--primary">Add Project</button>
         <button id="stop-all" class="btn">Stop All</button>
       </div>

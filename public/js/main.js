@@ -1,7 +1,8 @@
 // Bootstrap: initial load, header actions, polling loops, event wiring.
 import { api } from './api.js';
 import { icons, logoIcon } from './icons.js';
-import { on, getState, setProjects, updateProject } from './state.js';
+import { on, getState, getProject, setProjects, updateProject } from './state.js';
+import { initTheme } from './theme.js';
 import { renderGroups, startGroup, stopGroup, restartGroup } from './groups.js';
 import { patchCard, startUptimeTicker } from './cards.js';
 import { renderRecent } from './recent.js';
@@ -16,15 +17,17 @@ const main = document.querySelector('#groups');
 const recentStrip = document.querySelector('#recent');
 const profileStrip = document.querySelector('#profiles');
 
-// Structural re-render on project list / search / collapse changes.
+// Structural re-render on project list / search / collapse / view changes.
 on('projects', () => {
   renderGroups(main);
   renderProfiles(); // running counts on the chips
   syncLogPanel();
+  refreshRunning();
 });
 on('project', (p) => {
   patchCard(p);
   refreshProfileCounts();
+  refreshRunning();
 });
 on('profiles', () => renderProfiles());
 on('recent', () => renderRecent(recentStrip));
@@ -37,9 +40,33 @@ on('status', ({ project, prev }) => {
   if (prev && prev.status === 'crashed' && project.status === 'running') {
     toastInfo(`${project.name} auto-restarted`);
   }
+  // In status columns a card has to move lanes, which a card-level patch
+  // cannot do — re-lay out the board instead.
+  if (getState().view === 'kanban') renderGroups(main);
 });
 
+// The LIVE badge belongs to whichever card the log drawer is streaming.
+let livePrev = null;
+on('logpanel', (id) => {
+  for (const pid of new Set([livePrev, id])) {
+    const p = pid && getProject(pid);
+    if (p) patchCard(p);
+  }
+  livePrev = id;
+});
+
+// Header readout: how many projects are actually serving right now.
+function refreshRunning() {
+  const { projects } = getState();
+  const up = projects.filter((p) => p.status === 'running' && (!p.port || p.health !== 'waiting')).length;
+  const el = document.querySelector('#running-count');
+  if (el) el.textContent = `${up}/${projects.length} running`;
+  const stopAll = document.querySelector('#stop-all');
+  if (stopAll) stopAll.disabled = !projects.some((p) => (p.runningServices?.length || 0) > 0);
+}
+
 function wireHeader() {
+  initTheme(document.querySelector('#theme-toggle'));
   document.querySelector('#add-project').addEventListener('click', openAddProjectDialog);
   document.querySelector('#stop-all').addEventListener('click', () => stopGroup(getState().projects));
   initSearch(document.querySelector('#search'));
@@ -101,5 +128,8 @@ async function boot() {
 document.querySelector('#logo').innerHTML = logoIcon;
 document.querySelector('#add-project').insertAdjacentHTML('afterbegin', icons.plus);
 document.querySelector('#stop-all').insertAdjacentHTML('afterbegin', icons.stop);
+// Both glyphs live in the thumb; CSS cross-fades them on the active theme.
+document.querySelector('.switch-theme__thumb').innerHTML =
+  `<span class="switch-theme__sun">${icons.sun}</span><span class="switch-theme__moon">${icons.moon}</span>`;
 
 boot();

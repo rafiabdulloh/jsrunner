@@ -19,7 +19,7 @@
 | | Fitur | Deskripsi |
 |---|---|---|
 | 🖥️ | **Dashboard Card** | Setiap project jadi kartu: nama, framework, package manager, folder, port, PID, status, uptime, group |
-| 📂 | **Workspace Scan** | Cukup masukkan **satu path folder** — semua service di dalamnya terdeteksi, pilih & tambahkan sekaligus |
+| 📂 | **Workspace Scan** | Cukup masukkan **satu path folder** — semua service di dalamnya terdeteksi, bisa dicari & dipilih lalu ditambahkan sekaligus |
 | ⚙️ | **Auto Scan** | Backend otomatis mendeteksi framework, package manager, port, dan sub-project |
 | 📜 | **Dynamic Script** | Semua script di `package.json` muncul otomatis — tanpa hardcode |
 | 🎛️ | **Run Settings** | Pilih script mana yang dipakai Start, custom command, dan env var per project |
@@ -167,11 +167,36 @@ Cukup **satu path folder** — tidak perlu menunjuk `package.json` satu per satu
 5. Centang service yang ingin ditambahkan (service yang punya script `dev`/`start` otomatis tercentang), pilih group — default memakai nama folder workspace.
 6. Klik **Add Selected** → semua service masuk dashboard sekaligus. ✅
 
-Shortcut di toolbar picker: **Select all**, **Select none**, **Only runnable**.
+Picker-nya punya **search** — lihat [Search di daftar pilihan](#-search-di-daftar-pilihan) di bawah.
 
 > 📁 Folder `node_modules`, `dist`, `build`, `.git`, dan sejenisnya dilewati saat scan.
 > 🔁 **Duplicate Protection:** Project dengan `package.json` yang sama tidak bisa ditambahkan dua kali — barisnya tampil non-aktif dengan label *already added*.
 > ➕ Endpoint `POST /api/project` tetap menerima path folder **maupun** path `package.json` untuk penambahan satu project.
+
+### 🔎 Search di daftar pilihan
+
+Tiga dialog memakai daftar pilihan yang sama dan semuanya punya kolom search di atasnya:
+
+| Dialog | Dicari berdasarkan |
+|---|---|
+| **Add Project** (picker hasil scan) | nama, path folder, framework, package manager, port, nama script |
+| **Dependencies** | nama, group, framework, port |
+| **Profile** (pilih anggota) | nama, group, framework, package manager, port |
+
+| Contoh query | Hasil |
+|---|---|
+| `mcs` | semua service `@mcs/...` |
+| `nestjs` | semua service NestJS |
+| `4001` | service dengan port 4001 |
+| `mcs resource` | multi-kata = AND, harus cocok keduanya |
+
+Aturan yang berlaku di ketiganya:
+
+- **Pilihan tidak hilang saat filter berubah.** Hitungan `6 selected · 2 of 11 shown` menunjukkan total pilihan berbanding yang sedang tampil, dan Save/Add tetap menyertakan pilihan yang sedang tersembunyi.
+- Tombol bulk (**Select all / Clear all / Only runnable**) bekerja pada **baris yang sedang terlihat**. Jadi alurnya bisa: cari `mcs` → Select all → cari `portal` → Select all → dua-duanya terpilih.
+- Baris `already added` tetap non-aktif dan tidak tersentuh tombol bulk.
+- Di dialog Profile, judul group ikut tersembunyi kalau semua isinya tersaring.
+- `Esc` di kolom search mengosongkan filter dulu; `Esc` kedua baru menutup dialog.
 
 ### 2️⃣ Menjalankan & Mengontrol Project
 
@@ -283,6 +308,8 @@ Dipilih per profile di dialog Edit:
 |---|---|
 | **Parallel** (default) | Semua anggota start sekaligus. Dependency tetap dihormati — tiap anggota hanya menunggu project yang benar-benar jadi dependency-nya. |
 | **Sequential** | Anggota dijalankan **satu per satu sesuai urutan**. Service kedua tidak akan di-start sebelum service pertama benar-benar **ready** (port-nya menjawab). |
+
+Daftar anggota bisa dicari (lihat [Search di daftar pilihan](#-search-di-daftar-pilihan)); panel **Start order** tidak ikut tersaring supaya urutan penuh selalu terlihat.
 
 Urutan diatur di panel **Start order** dalam dialog: **drag baris** lewat handle ⠿, atau pakai tombol ↑ / ↓ (tetap ada untuk keyboard dan langkah presisi). Garis biru menunjukkan posisi jatuhnya baris. Project yang baru dicentang masuk ke urutan paling bawah. Di mode parallel panel ini ditampilkan redup karena urutannya tidak berpengaruh.
 

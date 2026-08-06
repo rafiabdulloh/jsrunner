@@ -245,10 +245,22 @@ export function stopProjectProcess(id) {
   return stopAllServicesForProject(id);
 }
 
-/** Restart a project (backward compat): stop all services, start default script. */
+/** Restart one service script: stop that entry only, start it again. */
+export function restartServiceProcess(project, script) {
+  stopServiceProcess(project.id, script);
+  return startServiceProcess(project, script);
+}
+
+/**
+ * Restart a project: cycle exactly the scripts that were running, so a card
+ * with several services comes back with the same set. With nothing running,
+ * falls back to the default script. Returns the first started entry.
+ */
 export function restartProjectProcess(project) {
+  const scripts = getRunningServices(project.id).map((s) => s.script);
   stopAllServicesForProject(project.id);
-  return startServiceProcess(project, defaultScript(project));
+  if (scripts.length === 0) return startServiceProcess(project, defaultScript(project));
+  return scripts.map((s) => startServiceProcess(project, s))[0];
 }
 
 /**

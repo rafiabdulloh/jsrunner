@@ -4,18 +4,6 @@ import { api } from './api.js';
 import { icons } from './icons.js';
 import { toastError, toastSuccess } from './toast.js';
 import { getProject, updateProject, addProject, removeProject, getState } from './state.js';
-import { openLogPanel } from './logs.js';
-
-function formatUptime(startedAt) {
-  if (!startedAt) return '—';
-  const s = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = s % 60;
-  const pad = (n) => String(n).padStart(2, '0');
-  return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${pad(m)}:${pad(sec)}`;
-}
-
 const esc = (s) =>
   String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -39,10 +27,18 @@ function openModal({ title, bodyHtml, actions, onOpen, wide = false }) {
     opener?.focus?.();
   };
   const onKey = (e) => {
-    if (e.key === 'Escape') {
-      e.stopPropagation();
-      close();
+    if (e.key !== 'Escape') return;
+    e.stopPropagation();
+    // Escape in a non-empty search box clears the search first. This lives here
+    // because this listener is on document in capture phase — a handler on the
+    // input itself could never run before it.
+    const el = e.target;
+    if (el instanceof HTMLInputElement && el.type === 'search' && el.value) {
+      el.value = '';
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      return;
     }
+    close();
   };
   document.addEventListener('keydown', onKey, true);
   backdrop.addEventListener('mousedown', (e) => {
@@ -95,6 +91,85 @@ function setError(backdrop, msg) {
   const inputEl = backdrop.querySelector('.field__input, .field__combobox, .field__select');
   if (el) el.textContent = msg ?? '';
   inputEl?.classList.toggle('field__input--error', Boolean(msg));
+}
+
+// ---------- Searchable checkbox list ----------
+// Shared by the workspace scan picker, the dependency picker and the profile
+// picker: same markup contract, same filtering semantics.
+
+const searchBox = (placeholder) =>
+  `<div class="scan__search-row">
+    <input class="field__input scan__search" type="search" spellcheck="false" placeholder="${placeholder}">
+  </div>`;
+
+/** Lowercased haystack for a row's data-search attribute. */
+const haystack = (...parts) => parts.filter(Boolean).join(' ').toLowerCase();
+
+/**
+ * Filter a `.scan__list` from a `.scan__search` box.
+ *
+ * Rows carry `data-search`; multiple space-separated terms must all match.
+ * Selection deliberately survives filtering — searching is how you build a
+ * selection in several passes — so bulk actions act on visible rows only and
+ * the count reports both numbers.
+ *
+ * @param {HTMLElement} backdrop
+ * @param {{checkSelector: string, headingSelector?: string, countSelected?: () => number}} opts
+ */
+function wireListSearch(backdrop, { checkSelector, headingSelector = null, countSelected = null }) {
+  const rowSelector = '.scan__item';
+  const rows = [...backdrop.querySelectorAll(rowSelector)];
+  const checks = [...backdrop.querySelectorAll(`${checkSelector}:not([disabled])`)];
+  const headings = headingSelector ? [...backdrop.querySelectorAll(headingSelector)] : [];
+  const searchEl = backdrop.querySelector('.scan__search');
+  const countEl = backdrop.querySelector('.scan__count');
+  const emptyEl = backdrop.querySelector('.scan__empty');
+
+  const visibleChecks = () => checks.filter((c) => !c.closest(rowSelector).hidden);
+
+  const sync = () => {
+    if (!countEl) return;
+    const n = countSelected ? countSelected() : checks.filter((c) => c.checked).length;
+    const shown = rows.filter((r) => !r.hidden).length;
+    countEl.textContent = shown === rows.length
+      ? `${n} selected`
+      : `${n} selected · ${shown} of ${rows.length} shown`;
+  };
+
+  const applyFilter = () => {
+    const query = searchEl.value.trim();
+    const terms = query ? query.toLowerCase().split(/\s+/) : [];
+    for (const row of rows) {
+      row.hidden = terms.some((t) => !row.dataset.search.includes(t));
+    }
+
+    // A group heading with nothing left under it is just noise
+    for (const heading of headings) {
+      let el = heading.nextElementSibling;
+      let any = false;
+      while (el && !el.matches(headingSelector)) {
+        if (el.matches(rowSelector) && !el.hidden) {
+          any = true;
+          break;
+        }
+        el = el.nextElementSibling;
+      }
+      heading.hidden = !any;
+    }
+
+    const shown = rows.filter((r) => !r.hidden).length;
+    if (emptyEl) {
+      emptyEl.hidden = shown > 0;
+      emptyEl.textContent = `No matches for "${query}"`;
+    }
+    sync();
+  };
+
+  checks.forEach((c) => c.addEventListener('change', sync));
+  searchEl.addEventListener('input', applyFilter);
+  sync();
+
+  return { searchEl, rows, checks, visibleChecks, sync, applyFilter };
 }
 
 // Wire group select/input toggle — select always visible
@@ -195,13 +270,16 @@ export function openAddProjectDialog() {
           <span>${result.services.length} service${result.services.length === 1 ? '' : 's'} found ·
             ${selectable.length} available${result.truncated ? ' · scan truncated' : ''}</span>
         </div>` +
+        searchBox('Search name, folder, framework, port, script…') +
         `<div class="scan__toolbar">
           <button class="btn btn--sm" data-sact="all">Select all</button>
           <button class="btn btn--sm" data-sact="none">Select none</button>
           <button class="btn btn--sm" data-sact="runnable">Only runnable</button>
           <span class="scan__count"></span>
         </div>` +
-        `<div class="scan__list">${result.services.map(serviceRow).join('')}</div>` +
+        `<div class="scan__list">${result.services.map(serviceRow).join('')}
+          <span class="scan__empty" hidden></span>
+        </div>` +
         field('Group for added services', groupInput('group', result.name)) +
         '<span class="field__error"></span>',
       actions: [
@@ -231,26 +309,24 @@ export function openAddProjectDialog() {
       ],
       onOpen: (b) => {
         wireGroupPicker(b);
-        const checks = [...b.querySelectorAll('.scan__check:not([disabled])')];
-        const countEl = b.querySelector('.scan__count');
-        const sync = () => {
-          const n = checks.filter((c) => c.checked).length;
-          countEl.textContent = `${n} selected`;
-        };
-        checks.forEach((c) => c.addEventListener('change', sync));
+        const { visibleChecks, sync, searchEl } = wireListSearch(b, { checkSelector: '.scan__check' });
+
+        // Bulk actions act on what is currently visible — that is the point of
+        // filtering first ("show me *-service, then take all of them").
         b.querySelector('[data-sact="all"]').addEventListener('click', () => {
-          checks.forEach((c) => { c.checked = true; });
+          visibleChecks().forEach((c) => { c.checked = true; });
           sync();
         });
         b.querySelector('[data-sact="none"]').addEventListener('click', () => {
-          checks.forEach((c) => { c.checked = false; });
+          visibleChecks().forEach((c) => { c.checked = false; });
           sync();
         });
         b.querySelector('[data-sact="runnable"]').addEventListener('click', () => {
-          checks.forEach((c) => { c.checked = c.dataset.runnable === '1'; });
+          visibleChecks().forEach((c) => { c.checked = c.dataset.runnable === '1'; });
           sync();
         });
-        sync();
+
+        searchEl.focus();
       },
     });
   }
@@ -286,9 +362,19 @@ function serviceRow(s) {
     s.added ? '<span class="scan__badge scan__badge--muted">already added</span>' : '',
   ].join('');
 
+  const search = haystack(
+    s.name,
+    s.relative,
+    s.isRoot ? 'root' : '',
+    s.framework,
+    s.pm,
+    s.port ?? '',
+    ...(s.scripts || [])
+  );
+
   const checked = !s.added && s.runnable ? 'checked' : '';
   return `
-    <label class="scan__item ${s.added ? 'scan__item--disabled' : ''}">
+    <label class="scan__item ${s.added ? 'scan__item--disabled' : ''}" data-search="${esc(search)}">
       <input type="checkbox" class="scan__check" value="${esc(s.path)}"
         data-runnable="${s.runnable ? 1 : 0}" ${checked} ${s.added ? 'disabled' : ''}>
       <span class="scan__info">
@@ -341,25 +427,29 @@ export function openProfileDialog(profile = null) {
           <option value="sequential" ${mode === 'sequential' ? 'selected' : ''}>Sequential — one at a time, in order</option>
         </select>`) +
       '<p class="modal__hint" data-mode-hint></p>' +
+      searchBox('Search project, group, framework, port…') +
       `<div class="scan__toolbar">
         <span class="field__label">Projects</span>
+        <button class="btn btn--sm" data-pfact="all" type="button">Select all</button>
         <button class="btn btn--sm" data-pfact="none" type="button">Clear all</button>
         <span class="scan__count"></span>
       </div>` +
       `<div class="scan__list">${sections.map(([group, list]) => `
         <div class="profile__group">${esc(group)}</div>
         ${list.map((p) => `
-          <label class="scan__item">
-            <input type="checkbox" class="pf__check" value="${esc(p.id)}" ${selected.has(p.id) ? 'checked' : ''}>
+          <label class="scan__item" data-search="${esc(haystack(p.name, p.group || 'ungrouped', p.framework, p.pm, p.port ?? 'no port'))}">
+            <input type="checkbox" class="pf__check scan__check" value="${esc(p.id)}" ${selected.has(p.id) ? 'checked' : ''}>
             <span class="scan__info">
               <span class="scan__name">${esc(p.name)}</span>
               <span class="scan__badges">
-                <span class="scan__badge">${esc(p.framework)}</span>
-                ${p.port ? `<span class="scan__badge">:${p.port}</span>` : '<span class="scan__badge scan__badge--muted">no port</span>'}
+                <span class="badge badge--${esc(p.framework.toLowerCase())}">${esc(p.framework)}</span>
+                ${p.port ? `<span class="scan__port">:${p.port}</span>` : '<span class="scan__badge scan__badge--muted">no port</span>'}
                 ${p.dependsOn?.length ? `<span class="scan__badge scan__badge--info">${p.dependsOn.length} dep${p.dependsOn.length === 1 ? '' : 's'}</span>` : ''}
               </span>
             </span>
-          </label>`).join('')}`).join('')}</div>` +
+          </label>`).join('')}`).join('')}
+        <span class="scan__empty" hidden></span>
+      </div>` +
       '<div class="order" data-order-wrap>' +
         '<span class="field__label">Start order</span>' +
         '<div class="order__list" data-order-list></div>' +
@@ -398,17 +488,24 @@ export function openProfileDialog(profile = null) {
       },
     ],
     onOpen: (b) => {
-      const checks = [...b.querySelectorAll('.pf__check')];
-      const countEl = b.querySelector('.scan__count');
       const listEl = b.querySelector('[data-order-list]');
       const wrapEl = b.querySelector('[data-order-wrap]');
       const hintEl = b.querySelector('[data-mode-hint]');
       const modeEl = b.querySelector('[name="mode"]');
       const nameOf = (id) => projects.find((p) => p.id === id)?.name || id;
 
+      // The count comes from the ordered selection, not the checkbox states —
+      // they agree, but `order` is the thing that gets saved.
+      const search = wireListSearch(b, {
+        checkSelector: '.pf__check',
+        headingSelector: '.profile__group',
+        countSelected: () => order.length,
+      });
+      const checks = search.checks;
+
       const renderOrder = () => {
         const sequential = modeEl.value === 'sequential';
-        countEl.textContent = `${order.length} selected`;
+        search.sync();
 
         hintEl.innerHTML = sequential
           ? 'Each service must be <strong>ready</strong> (its port answering) before the next one starts. ' +
@@ -534,9 +631,21 @@ export function openProfileDialog(profile = null) {
       }));
 
       modeEl.addEventListener('change', renderOrder);
+
+      // Bulk actions act on visible rows only, so search-then-select works
+      b.querySelector('[data-pfact="all"]').addEventListener('click', () => {
+        for (const c of search.visibleChecks()) {
+          c.checked = true;
+          if (!order.includes(c.value)) order.push(c.value);
+        }
+        renderOrder();
+      });
       b.querySelector('[data-pfact="none"]').addEventListener('click', () => {
-        checks.forEach((c) => { c.checked = false; });
-        order.length = 0;
+        for (const c of search.visibleChecks()) {
+          c.checked = false;
+          const at = order.indexOf(c.value);
+          if (at !== -1) order.splice(at, 1);
+        }
         renderOrder();
       });
 
@@ -670,14 +779,21 @@ export function openDependenciesDialog(id) {
     bodyHtml:
       '<p class="modal__hint">Starting <strong>' + esc(p.name) + '</strong> will start these first and wait until ' +
       'each one answers on its port (projects without a port are only started, not waited for).</p>' +
+      searchBox('Search project, group, port…') +
+      `<div class="scan__toolbar">
+        <button class="btn btn--sm" data-dact="none" type="button">Clear all</button>
+        <span class="scan__count"></span>
+      </div>` +
       `<div class="scan__list">${others.map((o) => `
-        <label class="scan__item">
+        <label class="scan__item" data-search="${esc(haystack(o.name, o.group || 'ungrouped', o.framework, o.port ?? 'no port'))}">
           <input type="checkbox" class="dep__check" value="${esc(o.id)}" ${current.has(o.id) ? 'checked' : ''}>
           <span class="scan__info">
             <span class="scan__name">${esc(o.name)}</span>
             <span class="scan__path">${esc(o.group || 'Ungrouped')} · ${o.port ? `port ${o.port}` : 'no port'}</span>
           </span>
-        </label>`).join('')}</div>` +
+        </label>`).join('')}
+        <span class="scan__empty" hidden></span>
+      </div>` +
       '<span class="field__error"></span>',
     actions: [
       { label: 'Cancel', onClick: ({ close }) => close() },
@@ -703,6 +819,14 @@ export function openDependenciesDialog(id) {
         },
       },
     ],
+    onOpen: (b) => {
+      const { visibleChecks, sync, searchEl } = wireListSearch(b, { checkSelector: '.dep__check' });
+      b.querySelector('[data-dact="none"]').addEventListener('click', () => {
+        visibleChecks().forEach((c) => { c.checked = false; });
+        sync();
+      });
+      searchEl.focus();
+    },
   });
 }
 
@@ -971,124 +1095,6 @@ export function openDeleteGroupDialog(name) {
     ],
   });
 }
-// ---------- Service Detail Modal ----------
-export function openServiceDialog(id, script) {
-  const p = getProject(id);
-  if (!p) return;
-
-  let timer = null;
-  const { openModal } = {};
-
-  const openModal2 = ({ title, bodyHtml, actions }) => {
-    const opener = document.activeElement;
-    const backdrop = document.createElement('div');
-    backdrop.className = 'modal-backdrop';
-    backdrop.innerHTML = `
-      <div class="modal" role="dialog" aria-modal="true" aria-label="${title}">
-        <div class="modal__header">
-          <span class="modal__title">${title}</span>
-          <button class="btn btn--sm btn--icon" data-mact="close" title="Close">${icons.x}</button>
-        </div>
-        <div class="modal__body">${bodyHtml}</div>
-        <div class="modal__footer"></div>
-      </div>`;
-
-    const close = () => {
-      if (timer) clearInterval(timer);
-      document.removeEventListener('keydown', onKey, true);
-      backdrop.remove();
-      opener?.focus?.();
-    };
-    const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
-    document.addEventListener('keydown', onKey, true);
-    backdrop.addEventListener('mousedown', (e) => { if (e.target === backdrop) close(); });
-    backdrop.querySelector('[data-mact="close"]').addEventListener('click', close);
-
-    const footer = backdrop.querySelector('.modal__footer');
-    for (const a of actions) {
-      const btn = document.createElement('button');
-      btn.className = `btn ${a.primary ? 'btn--primary' : ''} ${a.danger ? 'btn--danger' : ''}`;
-      btn.textContent = a.label;
-      btn.dataset.svcAction = a.key || '';
-      btn.addEventListener('click', () => a.onClick({ backdrop, close, btn }));
-      footer.appendChild(btn);
-    }
-    document.body.appendChild(backdrop);
-    return { backdrop, close };
-  };
-
-  const serviceIsRunning = () => {
-    const cur = getProject(id);
-    return cur?.runningServices?.some((s) => s.script === script);
-  };
-
-  const getService = () => {
-    const cur = getProject(id);
-    return cur?.runningServices?.find((s) => s.script === script) || null;
-  };
-
-  const render = () => {
-    const cur = getProject(id);
-    if (!cur) return;
-    const svc = getService();
-    const body = backdrop?.querySelector('.modal__body');
-    if (!body) return;
-    body.innerHTML = `
-      <dl class="card__meta">
-        ${field('Status', `<span class="pill pill--${svc ? 'running' : 'stopped'}">${svc ? 'Running' : 'Stopped'}</span>`)}
-        ${svc ? field('PID', `<div class="field__value">${svc.pid}</div>`) : ''}
-        ${svc ? field('Uptime', `<div class="field__value">${formatUptime(svc.startedAt)}</div>`) : ''}
-      </dl>`;
-    const footer = backdrop?.querySelector('.modal__footer');
-    if (!footer) return;
-    const startBtn = footer.querySelector('[data-svc-action="start"]');
-    const stopBtn = footer.querySelector('[data-svc-action="stop"]');
-    if (startBtn) startBtn.disabled = !!svc;
-    if (stopBtn) stopBtn.disabled = !svc;
-  };
-
-  let backdrop;
-  const m = openModal2({
-    title: `${script} — ${p.name}`,
-    bodyHtml: '<div class="service-modal-body"></div>',
-    actions: [
-      {
-        label: 'View Log',
-        primary: true,
-        key: 'log',
-        onClick: ({ close }) => { close(); openLogPanel(id, script); },
-      },
-      {
-        label: 'Start',
-        key: 'start',
-        onClick: async ({ close, btn }) => {
-          btn.disabled = true;
-          try { await api.startProject(id, script); toastSuccess(`${script} started`); }
-          catch (err) { toastError(err.message); }
-          btn.disabled = false;
-        },
-      },
-      {
-        label: 'Stop',
-        danger: true,
-        key: 'stop',
-        onClick: async ({ close, btn }) => {
-          btn.disabled = true;
-          try { await api.stopProject(id, script); toastSuccess(`${script} stopped`); }
-          catch (err) { toastError(err.message); }
-          btn.disabled = false;
-        },
-      },
-    ],
-  });
-  backdrop = m.backdrop;
-  render();
-  timer = setInterval(() => {
-    const cur = getProject(id);
-    if (cur) { render(); }
-  }, 2000);
-}
-
 // ---------- Delete ----------
 export function openDeleteDialog(id) {
   const p = getProject(id);

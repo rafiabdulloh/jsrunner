@@ -2,7 +2,7 @@
 // copy/download/clear/pause-scroll.
 import { api } from './api.js';
 import { icons } from './icons.js';
-import { getProject } from './state.js';
+import { getProject, setLogProject } from './state.js';
 import { toastError, toastSuccess } from './toast.js';
 import { ansiToHtml, stripAnsi } from './ansi.js';
 
@@ -164,11 +164,14 @@ export function openLogPanel(id, script) {
   poll();
   // Fallback ticker: harmless when SSE is live, essential when it is not
   timer = setInterval(poll, 1000);
+  // Lets the card show its LIVE badge while this drawer is streaming.
+  setLogProject(id);
 }
 
 export function closeLogPanel() {
   if (timer) clearInterval(timer);
   timer = null;
+  if (currentId) setLogProject(null);
   currentId = null;
   currentScript = null;
   lines = [];
